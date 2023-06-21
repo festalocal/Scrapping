@@ -48,12 +48,12 @@ async function listAgendas({ key, size = 100, after = '', search = '', official 
  *      - after: utile pour récupérer les résultats suivants
  *  @return {Object} Les données reçues de l'API
  *=============================================**/
-async function listEvents({ key, agendaUid, size = 20, after = '' } = {}) {
+async function listEvents({ key, agendaUid, size = 20, after = '', searchWord } = {}) {
     // Construit l'URL de l'API avec l'UID de l'agenda
     const url = new URL(`https://api.openagenda.com/v2/agendas/${agendaUid}/events`);
 
     // Prépare les paramètres à utiliser dans la requête
-    const params = { key, size, after };
+    const params = { key, size, after, searchWord };
 
     // Supprime les paramètres qui ne sont pas fournis (c'est-à-dire ceux qui sont encore à leur valeur par défaut '')
     Object.keys(params).forEach(key => {
@@ -63,7 +63,7 @@ async function listEvents({ key, agendaUid, size = 20, after = '' } = {}) {
     // Ajoute les paramètres à l'URL
     url.search = new URLSearchParams(params).toString();
 
-    console.log(url)
+    //console.log(url)
 
     // Envoie la requête à l'API
     const response = await fetch(url.toString());
@@ -91,7 +91,7 @@ async function listEvents({ key, agendaUid, size = 20, after = '' } = {}) {
 async function main() {
     try {
         // Nous définissons un tableau de mots-clés que nous voulons chercher.
-        const searchKeywords = ['fête', 'festa', 'feria'];
+        const searchKeywords = ['fête', 'festa', 'feria', 'fete'];
 
         // Créer un tableau pour stocker tous les agendas
         let allAgendas = [];
@@ -118,15 +118,17 @@ async function main() {
         for (let uid of agendaUids) {
             console.log(`Récupération des événements pour l'agenda ${uid}...`);
 
+            for (const keyword of searchKeywords) {
             // Récupère les 50 premiers événements de l'agenda
             const events = await listEvents({
                 key: '6958c89c91384f01ba90d60be5b1847f',  // clé API
                 agendaUid: uid,
-                size: 50,  // définit la taille de la page à 50
+                size: 50,  // définit la taille de la page à 50,
+                search: keyword
             });
-
+            console.log(JSON.stringify(events, null, 2));
+            }
             // Affiche les événements pour cet agenda
-            console.log(events);
         }
     } catch (error) {
         // Affiche l'erreur
