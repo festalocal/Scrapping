@@ -38,25 +38,101 @@ async function listAgendas({ key, size = 100, after = '', search = '', official 
     return data;
 }
 
+/**==============================================
+ **              listEvents
+ *? Récupère les événements d'un agenda donné
+ *  @param {Object} params Les paramètres à utiliser pour la requête à l'API
+ *      - key: la clé d'API
+ *      - agendaUid: l'identifiant de l'agenda
+ *      - size: le nombre d'événements à récupérer par requête (par défaut 20)
+ *      - after: utile pour récupérer les résultats suivants
+ *  @return {Object} Les données reçues de l'API
+ *=============================================**/
+async function listEvents({ key, agendaUid, size = 20, after = '' } = {}) {
+    // Construit l'URL de l'API avec l'UID de l'agenda
+    const url = new URL(`https://api.openagenda.com/v2/agendas/${agendaUid}/events`);
 
-// Nous définissons un tableau de mots-clés que nous voulons chercher.
-const searchKeywords = ['fête', 'festa', 'feria'];
+    // Prépare les paramètres à utiliser dans la requête
+    const params = { key, size, after };
 
-// Nous parcourons chaque mot-clé dans notre tableau.
-searchKeywords.forEach(keyword => {
-    // Pour chaque mot-clé, nous appelons la fonction "listAgendas" avec ce mot-clé comme paramètre de recherche.
-    listAgendas({
-        key: '6958c89c91384f01ba90d60be5b1847f', //Clé API
-        size: 10, //Nombre d'agendas retournés
-        search: keyword, //Mots clés de recherche
-        sort: 'createdAt.desc' //Ordre de création décroissant
-    })
-    // Une fois que la promesse retournée par "listAgendas" est résolue, nous imprimons les résultats dans la console.
-    .then(data => {
-        console.log(`Résultats pour "${keyword}":`, data);
-    })
-    // Si une erreur se produit pendant l'exécution de "listAgendas", nous l'attrapons ici et l'imprimons dans la console.
-    .catch(error => {
-        console.error(`Erreur lors de la recherche pour "${keyword}":`, error);
+    // Supprime les paramètres qui ne sont pas fournis (c'est-à-dire ceux qui sont encore à leur valeur par défaut '')
+    Object.keys(params).forEach(key => {
+        if (params[key] === '') delete params[key];
     });
-});
+
+    // Ajoute les paramètres à l'URL
+    url.search = new URLSearchParams(params).toString();
+
+    console.log(url)
+
+    // Envoie la requête à l'API
+    const response = await fetch(url.toString());
+
+    // Si la requête n'est pas réussie, jette une erreur
+    if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    // Sinon, extrait les données JSON de la réponse
+    const data = await response.json();
+
+    // Renvoie les données
+    return data;
+}
+
+/**==============================================
+ **              main
+ *? Cette fonction liste tous les agendas puis 
+ *? récupère les événements pour chacun d'eux
+ *@param None
+ *@return None
+ *=============================================**/
+
+async function main() {
+    try {
+        // Nous définissons un tableau de mots-clés que nous voulons chercher.
+        const searchKeywords = ['fête', 'festa', 'feria'];
+
+        // Créer un tableau pour stocker tous les agendas
+        let allAgendas = [];
+
+        // Nous parcourons chaque mot-clé dans notre tableau.
+        for (const keyword of searchKeywords) {
+            // Pour chaque mot-clé, nous appelons la fonction "listAgendas" avec ce mot-clé comme paramètre de recherche.
+            const agendas = await listAgendas({
+                key: '6958c89c91384f01ba90d60be5b1847f', //Clé API
+                size: 50, //Nombre d'agendas retournés
+                search: keyword, //Mots clés de recherche
+                sort: 'createdAt.desc', //Ordre de création décroissant
+                official: 1
+            });
+
+            // Ajouter les agendas de cette recherche à notre tableau total
+            allAgendas = allAgendas.concat(agendas.agendas);
+        }
+
+        // Extraire les UIDs des agendas
+        const agendaUids = allAgendas.map(agenda => agenda.uid);
+
+        // Parcourt tous les UIDs d'agenda pour récupérer leurs événements
+        for (let uid of agendaUids) {
+            console.log(`Récupération des événements pour l'agenda ${uid}...`);
+
+            // Récupère les 50 premiers événements de l'agenda
+            const events = await listEvents({
+                key: '6958c89c91384f01ba90d60be5b1847f',  // clé API
+                agendaUid: uid,
+                size: 50,  // définit la taille de la page à 50
+            });
+
+            // Affiche les événements pour cet agenda
+            console.log(events);
+        }
+    } catch (error) {
+        // Affiche l'erreur
+        console.error('Une erreur est survenue :', error);
+    }
+}
+
+// Appel de la fonction main
+main();
