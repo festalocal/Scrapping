@@ -1,3 +1,6 @@
+
+const fs = require('fs');
+
 /**==============================================
  **              listAgendas
  *? Cette fonction fait une requête à l'API OpenAgenda pour récupérer une liste des agendas.
@@ -6,7 +9,7 @@
  *@return {Promise<Object>} Une promesse qui résout en un objet contenant les données de la réponse de l'API
  *=============================================**/
 
-async function listAgendas({ key, size = 100, after = '', search = '', official = '', slug = '', uid = '', network = '', sort = '' } = {}) {
+async function listAgendas({ key, size, after = '', search = '', official = '', slug = '', uid = '', network = '', sort = '' } = {}) {
 
     // Nous définissons l'URL de base de l'API que nous allons appeler.
     const url = new URL('https://api.openagenda.com/v2/agendas');
@@ -48,7 +51,7 @@ async function listAgendas({ key, size = 100, after = '', search = '', official 
  *      - after: utile pour récupérer les résultats suivants
  *  @return {Object} Les données reçues de l'API
  *=============================================**/
-async function listEvents({ key, agendaUid, size = 20, after = '', searchWord } = {}) {
+async function listEvents({ key, agendaUid, size, after = '', searchWord } = {}) {
     // Construit l'URL de l'API avec l'UID de l'agenda
     const url = new URL(`https://api.openagenda.com/v2/agendas/${agendaUid}/events`);
 
@@ -89,9 +92,11 @@ async function listEvents({ key, agendaUid, size = 20, after = '', searchWord } 
  *=============================================**/
 
 async function main() {
+    // Créer un tableau pour stocker tous les événements
+    let allEvents = [];
     try {
         // Nous définissons un tableau de mots-clés que nous voulons chercher.
-        const searchKeywords = ['fête', 'festa', 'feria', 'fete'];
+        const searchKeywords = ['fête', 'festa', 'feria', 'fete', 'fest-noz', 'foire', 'guinguette', 'carnaval', 'tradition', 'traditionnel', 'medieval'];
 
         // Créer un tableau pour stocker tous les agendas
         let allAgendas = [];
@@ -101,7 +106,7 @@ async function main() {
             // Pour chaque mot-clé, nous appelons la fonction "listAgendas" avec ce mot-clé comme paramètre de recherche.
             const agendas = await listAgendas({
                 key: '6958c89c91384f01ba90d60be5b1847f', //Clé API
-                size: 50, //Nombre d'agendas retournés
+                size: 5, //Nombre d'agendas retournés
                 search: keyword, //Mots clés de recherche
                 sort: 'createdAt.desc', //Ordre de création décroissant
                 official: 1
@@ -119,21 +124,31 @@ async function main() {
             console.log(`Récupération des événements pour l'agenda ${uid}...`);
 
             for (const keyword of searchKeywords) {
-            // Récupère les 50 premiers événements de l'agenda
-            const events = await listEvents({
-                key: '6958c89c91384f01ba90d60be5b1847f',  // clé API
-                agendaUid: uid,
-                size: 50,  // définit la taille de la page à 50,
-                search: keyword
-            });
-            console.log(JSON.stringify(events, null, 2));
+                // Récupère les 50 premiers événements de l'agenda
+                const events = await listEvents({
+                    key: '6958c89c91384f01ba90d60be5b1847f',  // clé API
+                    agendaUid: uid,
+                    size: 5,  // définit la taille de la page à 5,
+                    search: keyword
+                });
+
+                // Ajoute les événements à notre tableau total
+                allEvents = allEvents.concat(events);
             }
-            // Affiche les événements pour cet agenda
         }
     } catch (error) {
         // Affiche l'erreur
         console.error('Une erreur est survenue :', error);
     }
+
+    // Écrit tous les événements dans un fichier
+    fs.writeFile('events.json', JSON.stringify(allEvents, null, 2), (err) => {
+        if (err) {
+            console.error('Une erreur est survenue lors de l\'écriture du fichier:', err);
+        } else {
+            console.log('Tous les événements ont été enregistrés dans le fichier all_events.json');
+        }
+    });
 }
 
 // Appel de la fonction main
