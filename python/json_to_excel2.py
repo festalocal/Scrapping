@@ -4,6 +4,21 @@ import openpyxl
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, colors
 
+
+def adjust_columns_width(worksheet):
+    for column in worksheet.columns:
+        max_length = 0
+        column = [cell for cell in column]
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(cell.value)
+            except:
+                pass
+        adjusted_width = (max_length + 2)
+        worksheet.column_dimensions[column[0].column_letter].width = adjusted_width
+
+
 def remove_duplicates_and_blank_titles(excel_file, sheet_name, columns):
     df = pd.read_excel(excel_file, sheet_name=sheet_name)
 
@@ -128,8 +143,10 @@ def convert_json_to_excel(json_file, excel_file):
             else:  # Pour les lignes paires
                 cell.fill = PatternFill(start_color='FFFFFF', end_color='FFFFFF', fill_type='solid')
 
+    adjust_columns_width(worksheet)
+    remove_duplicates_and_blank_titles("evenements.xlsx", 'Événements', ['Titre', 'Lieu', 'Dates'])
     workbook.save(excel_file)
 
 if __name__ == '__main__':
     convert_json_to_excel("events.json", "evenements.xlsx")
-    remove_duplicates_and_blank_titles("evenements.xlsx", 'Événements', ['Titre', 'Lieu', 'Dates'])
+    
