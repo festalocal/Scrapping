@@ -1,111 +1,149 @@
-import openpyxl
-from openpyxl.styles import Alignment, Font
+import pandas as pd
 import json
-from urllib.parse import urljoin
+import openpyxl
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, colors
+from datetime import datetime
 
-def json_to_excel(json_data, excel_file):
-    """
-    Cette fonction convertit les données JSON en un fichier Excel.
+def format_time(time_str, new_format="%I:%M %p"):
+    try:
+        return datetime.fromisoformat(time_str.replace("Z", "+00:00")).strftime(new_format)
+    except ValueError:
+        return time_str
 
-    :param json_data: Les données JSON à convertir.
-    :type json_data: str
-    :param excel_file: Le nom du fichier Excel de sortie.
-    :type excel_file: str
-    :return: None
-    """
+
+
+def adjust_columns_width(worksheet):
+    for column in worksheet.columns:
+        max_length = 0
+        column = [cell for cell in column]
+        for cell in column:
+            try:
+                if len(str(cell.value)) > max_length:
+                    max_length = len(cell.value)
+            except:
+                pass
+        adjusted_width = (max_length + 2)
+        worksheet.column_dimensions[column[0].column_letter].width = adjusted_width
+
+def get_nested_value(obj, keys, default=''):
+    for key in keys:
+        if obj is None:
+            return default
+        if key in obj:
+            obj = obj[key]
+        else:
+            return default
+    return obj
+
+def convert_json_to_excel(json_file, excel_file):
+    with open(json_file, encoding='utf-8') as f:
+        data = json.load(f)
+
+    events = []
     
-    workbook = openpyxl.Workbook()
-    sheet = workbook.active
+    for obj in data:
+        if 'events' in obj:
+            events.extend(obj['events'])
 
-    # Convertir le JSON en dictionnaire Python
-    data = json.loads(json_data)
-
-    # Extraire tous les événements de tous les objets JSON
-    all_events = []
-    for json_obj in data:
-        events = json_obj['events']
-        all_events.extend(events)
-
-    # En-têtes de colonne avec leur style
     headers = [
-        ('Image', 30),
         ('Titre', 30),
         ('Description', 50),
+        ('Dates', 20),
+        ('Heure de début', 20),
+        ('Heure de fin', 20),
+        ('Mode de participation', 30),
         ('Lieu', 30),
         ('Adresse', 30),
         ('Ville', 20),
         ('Latitude', 20),
         ('Longitude', 20),
-        ('Dates', 20),
-        ('Heure de début', 20),
-        ('Heure de fin', 20),
-        ('Mode de participation', 30),
         ('Mots-clés', 30),
-        ('Agenda d\'origine', 30)
+        ('Agenda d\'origine', 30),
+        ('Image', 30)
     ]
 
-    # Appliquer les en-têtes de colonne et les styles
-    for col_num, (header, width) in enumerate(headers, 1):
-        cell = sheet.cell(row=1, column=col_num)
-        cell.value = header
-        cell.font = Font(bold=True)
-        sheet.column_dimensions[chr(64 + col_num)].width = width
+    columns = {header[0]: [] for header in headers}
+    
+    for event in events:
+        columns['Titre'].append(get_nested_value(event, ['title', 'fr']))
+        columns['Description'].append(get_nested_value(event, ['description', 'fr']))
+        columns['Dates'].append(get_nested_value(event, ['dateRange', 'fr']))
+        columns['Heure de début'].append(format_time(get_nested_value(event, ['lastTiming', 'begin'])))
+        columns['Heure de fin'].append(format_time(get_nested_value(event, ['lastTiming', 'end'])))
+        columns['Mode de participation'].append(get_nested_value(event, ['attendanceMode']))
+        columns['Lieu'].append(get_nested_value(event, ['location', 'name']))
+        columns['Adresse'].append(get_nested_value(event, ['location', 'address']))
+        columns['Ville'].append(get_nested_value(event, ['location', 'city']))
+        columns['Latitude'].append(get_nested_value(event, ['location', 'latitude']))
+        columns['Longitude'].append(get_nested_value(event, ['location', 'longitude']))
+        
+        keywords = get_nested_value(event, ['keywords', 'fr'], [])
+        if keywords is not None:
+            keywords = [keyword for keyword in keywords if keyword is not None]
+            columns['Mots-clés'].append(', '.join(keywords))
+        else:
+            columns['Mots-clés'].append('')
+        
+        columns['Agenda d\'origine'].append(get_nested_value(event, ['originAgenda', 'title']))
+        image = get_nested_value(event, ['image', 'filename'])
+        if image is not None:
+            image = 'https://cibul.s3.amazonaws.com/' + image
+        columns['Image'].append(image)
 
-    # Écrire les valeurs des événements dans les lignes suivantes
-    for row_num, event in enumerate(all_events, 2):
-        image_filename = event['image']['filename']
-        image_base_url = event['image']['base']
-        image_url = urljoin(image_base_url, image_filename)
-        title_fr = event['title'].get('fr', '')  # Utiliser get() pour éviter les KeyError
-        description_fr = event['description'].get('fr', '')  # Utiliser get() pour éviter les KeyError
-        location_name = event['location']['name']
-        location_address = event['location']['address']
-        location_city = event['location']['city']
-        location_latitude = event['location']['latitude']
-        location_longitude = event['location']['longitude']
-        date_range_fr = event['dateRange'].get('fr', '')  # Utiliser get() pour éviter les KeyError
-        begin_time = event['lastTiming']['begin'].split('T')[1][:-6]  # Extraire l'heure de début
-        end_time = event['lastTiming']['end'].split('T')[1][:-6]  # Extraire l'heure de fin
-        attendance_mode = event['attendanceMode']
-        keywords_fr = event['keywords'].get('fr', [])  # Utiliser get() pour éviter les KeyError
-        if keywords_fr is not None:
-            keywords_fr = ', '.join(str(k) for k in keywords_fr if k is not None)
-        origin_agenda_title = event['originAgenda']['title']
+    df = pd.DataFrame(columns)
 
-        row_values = [
-            image_url,
-            title_fr,
-            description_fr,
-            location_name,
-            location_address,
-            location_city,
-            location_latitude,
-            location_longitude,
-            date_range_fr,
-            begin_time,
-            end_time,
-            attendance_mode,
-            keywords_fr,
-            origin_agenda_title
-        ]
+    df['Titre_lower'] = df['Titre'].str.lower()
+    df['Dates_lower'] = df['Dates'].str.lower()
+    df['Description_lower'] = df['Description'].str.lower()
 
-        for col_num, value in enumerate(row_values, 1):
-            cell = sheet.cell(row=row_num, column=col_num)
+    df.drop_duplicates(subset=['Titre_lower', 'Dates_lower', 'Description_lower'], inplace=True)
+
+    df.drop(columns=['Titre_lower', 'Dates_lower', 'Description_lower'], inplace=True)
+
+    df['Titre'].replace('', pd.np.nan, inplace=True)
+    df.dropna(subset=['Titre'], inplace=True)
+
+    df.reset_index(drop=True, inplace=True)
+
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = 'Événements'
+    
+    for idx, header in enumerate(headers):
+        column_letter = chr(65 + idx)
+        column_width = header[1]
+        column_name = header[0]
+        
+        worksheet[f'{column_letter}1'] = column_name
+        worksheet.column_dimensions[column_letter].width = column_width
+        
+        header_cell = worksheet[f'{column_letter}1']
+        header_cell.font = Font(bold=True, color="FFFFFF")
+        header_cell.fill = PatternFill(start_color='483D8B', end_color='483D8B', fill_type='solid')
+        header_cell.alignment = Alignment(horizontal='center', vertical='center')
+
+    for row_idx, row in df.iterrows():
+        for idx, header in enumerate(headers):
+            column_letter = chr(65 + idx)
+            column_name = header[0]
+            value = row[column_name]
+            
+            cell = worksheet[f'{column_letter}{row_idx + 2}']
             cell.value = value
-            cell.alignment = Alignment(wrap_text=True)
 
-    # Ajuster la hauteur des lignes pour s'adapter au contenu
-    for row in sheet.iter_rows(min_row=2, max_row=sheet.max_row):
-        for cell in row:
-            cell.alignment = Alignment(vertical='center')
-            cell.alignment = Alignment(wrap_text=True)
-        sheet.row_dimensions[row[0].row].height = 50
+            # Alignement du texte
+            cell.alignment = Alignment(horizontal='left', vertical='center')
 
-    # Enregistrer le fichier Excel
+            # Style des cellules
+            if row_idx % 2 == 0:  # Pour les lignes impaires
+                cell.fill = PatternFill(start_color='D3D3D3', end_color='D3D3D3', fill_type='solid')
+            else:  # Pour les lignes paires
+                cell.fill = PatternFill(start_color='FFFFFF', end_color='FFFFFF', fill_type='solid')
+
+    adjust_columns_width(worksheet)
     workbook.save(excel_file)
-    print("Le fichier Excel a été créé avec succès.")
 
 if __name__ == '__main__':
-    with open("events.json", encoding='utf-8') as file:
-        json_data = file.read()
-    json_to_excel(json_data, "data.xlsx")
+    convert_json_to_excel("events.json", "evenements.xlsx")
+    
