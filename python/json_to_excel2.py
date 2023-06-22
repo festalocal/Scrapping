@@ -3,6 +3,14 @@ import json
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, colors
+from datetime import datetime
+
+def format_time(time_str, new_format="%I:%M %p"):
+    try:
+        return datetime.fromisoformat(time_str.replace("Z", "+00:00")).strftime(new_format)
+    except ValueError:
+        return time_str
+
 
 
 def adjust_columns_width(worksheet):
@@ -17,29 +25,6 @@ def adjust_columns_width(worksheet):
                 pass
         adjusted_width = (max_length + 2)
         worksheet.column_dimensions[column[0].column_letter].width = adjusted_width
-
-
-def remove_duplicates_and_blank_titles(excel_file, sheet_name, columns):
-    df = pd.read_excel(excel_file, sheet_name=sheet_name)
-
-    df = df[df['Titre'].notna()]
-
-    df.drop_duplicates(subset=columns, inplace=True)
-
-    # Utiliser openpyxl pour charger le classeur existant
-    workbook = openpyxl.load_workbook(excel_file)
-
-    # Supprimer la feuille de calcul si elle existe déjà
-    if sheet_name in workbook.sheetnames:
-        del workbook[sheet_name]
-
-    # Utiliser le classeur existant comme base pour le writer
-    with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name=sheet_name, index=False, header=True)
-
-    workbook.close()
-
-
 
 def get_nested_value(obj, keys, default=''):
     for key in keys:
@@ -84,8 +69,8 @@ def convert_json_to_excel(json_file, excel_file):
         columns['Titre'].append(get_nested_value(event, ['title', 'fr']))
         columns['Description'].append(get_nested_value(event, ['description', 'fr']))
         columns['Dates'].append(get_nested_value(event, ['dateRange', 'fr']))
-        columns['Heure de début'].append(get_nested_value(event, ['lastTiming', 'begin']))
-        columns['Heure de fin'].append(get_nested_value(event, ['lastTiming', 'end']))
+        columns['Heure de début'].append(format_time(get_nested_value(event, ['lastTiming', 'begin'])))
+        columns['Heure de fin'].append(format_time(get_nested_value(event, ['lastTiming', 'end'])))
         columns['Mode de participation'].append(get_nested_value(event, ['attendanceMode']))
         columns['Lieu'].append(get_nested_value(event, ['location', 'name']))
         columns['Adresse'].append(get_nested_value(event, ['location', 'address']))
@@ -107,6 +92,19 @@ def convert_json_to_excel(json_file, excel_file):
         columns['Image'].append(image)
 
     df = pd.DataFrame(columns)
+
+    df['Titre_lower'] = df['Titre'].str.lower()
+    df['Dates_lower'] = df['Dates'].str.lower()
+    df['Description_lower'] = df['Description'].str.lower()
+
+    df.drop_duplicates(subset=['Titre_lower', 'Dates_lower', 'Description_lower'], inplace=True)
+
+    df.drop(columns=['Titre_lower', 'Dates_lower', 'Description_lower'], inplace=True)
+
+    df['Titre'].replace('', pd.np.nan, inplace=True)
+    df.dropna(subset=['Titre'], inplace=True)
+
+    df.reset_index(drop=True, inplace=True)
 
     workbook = Workbook()
     worksheet = workbook.active
@@ -144,7 +142,6 @@ def convert_json_to_excel(json_file, excel_file):
                 cell.fill = PatternFill(start_color='FFFFFF', end_color='FFFFFF', fill_type='solid')
 
     adjust_columns_width(worksheet)
-    remove_duplicates_and_blank_titles("evenements.xlsx", 'Événements', ['Titre', 'Lieu', 'Dates'])
     workbook.save(excel_file)
 
 if __name__ == '__main__':
