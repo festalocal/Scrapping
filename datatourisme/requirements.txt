@@ -1,0 +1,4 @@
+requests
+json
+google-cloud-bigquery
+sklearn
