@@ -16,11 +16,9 @@ import numpy as np                        # Utilisé pour des calculs scientifiq
 #===================================================================================================
 # *                                         VARIABLES
 #===================================================================================================
-blackList = []
 
-#===================================================================================================
-# *                                         API#2 DATATOURISME
-#===================================================================================================
+#Mots interdits à définir 
+blackList = []
 
 # URL du fichier JSON-LD
 url = "https://diffuseur.datatourisme.fr/webservice/49eebc93390a819eb8c2a0f95a150916/93cac18d-5c3e-4101-b0f5-db0c94423c88"
@@ -33,8 +31,21 @@ client = bigquery.Client(credentials=credentials)
 dataset_id = 'festa'
 table_id = 'evenement'
 
-# Cette fonction récupère les données du fichier JSON-LD à l'URL spécifiée
+
+#===================================================================================================
+# *                                         API#2 DATATOURISME
+#===================================================================================================
+
 def fetch(url):
+    """
+    Cette fonction récupère les données du fichier JSON-LD à l'URL spécifiée.
+
+    Args:
+        url (str): L'URL du fichier JSON-LD.
+
+    Returns:
+        data (dict): Un dictionnaire contenant les données du fichier JSON-LD.
+    """
     # Récupéeration du fichier JSON-LD
     response = requests.get(url)
     data = response.json()
@@ -44,8 +55,17 @@ def fetch(url):
     #     json.dump(data, f, ensure_ascii=False)
     return data
 
-# Cette fonction adapte les données de l'événement à insérer dans BigQuery
 def adapt_event(event):
+    """
+    Cette fonction adapte les données de l'événement pour être insérées dans BigQuery.
+
+    Args:
+        event (dict): Un dictionnaire contenant les détails de l'événement.
+
+    Returns:
+        adapted_event (dict) or None: Un dictionnaire contenant les détails de l'événement adaptés pour BigQuery, ou None si l'événement contient un mot de la liste noire dans son titre.
+        event (dict) or None: L'événement original non modifié, ou None si les données ont été adaptées avec succès.
+    """
     # Vérifier la présence des clés requises
     if not all(key in event for key in ["rdfs:label", "schema:startDate", "schema:endDate", "isLocatedAt"]):
         return None, event
@@ -116,6 +136,16 @@ def adapt_event(event):
 
 
 def retrieve_date(event, date_key):
+    """
+    Cette fonction extrait une date d'un événement en fonction de la clé de la date donnée.
+
+    Args:
+        event (dict): L'événement d'où la date est à extraire.
+        date_key (str): La clé utilisée pour récupérer la date dans l'événement.
+
+    Returns:
+        str: Une représentation string de la date au format ISO si elle est trouvée, sinon None.
+    """
     if date_key in event:
         if isinstance(event[date_key], list):
             for date_obj in event[date_key]:
@@ -134,8 +164,14 @@ def retrieve_date(event, date_key):
                     return datetime.strptime(date_str, '%Y-%m-%d').date().isoformat()
     return None
 
-# Cette fonction insère un événement dans BigQuery
 def insert_into_bigquery(event):
+    """
+    Cette fonction insère un événement dans une table spécifique de BigQuery.
+
+    Args:
+        event (dict): L'événement à insérer dans la table BigQuery.
+
+    """
     table_ref = client.dataset(dataset_id).table(table_id)
     table = client.get_table(table_ref)
 
@@ -172,16 +208,34 @@ def blacklist(event_title, list):
 #                                          TEST DE SIMILARITE
 #===================================================================================================
 
-# La fonction jaccard_similarity() calcule la similarité de Jaccard entre deux listes.
-# La fonction calculate_event_similarity() utilise cette fonction, ainsi que d'autres critères,
-# pour calculer un score de similarité global entre deux événements.
-
 def jaccard_similarity(list1, list2):
+    """
+    Cette fonction calcule la similarité de Jaccard entre deux listes.
+    
+    Args:
+        list1 (list): Première liste à comparer.
+        list2 (list): Deuxième liste à comparer.
+
+    Returns:
+        float: Score de similarité de Jaccard entre les deux listes.
+    """
     s1 = set(list1)
     s2 = set(list2)
     return len(s1.intersection(s2)) / len(s1.union(s2))
 
 def calculate_event_similarity(event1, event2):
+    """
+    Cette fonction calcule un score de similarité global entre deux événements en utilisant la similarité de Jaccard
+    et d'autres critères (comparaison des titres, des villes, des dates de début et de fin).
+    
+    Args:
+        event1 (dict): Premier événement à comparer.
+        event2 (dict): Deuxième événement à comparer.
+
+    Returns:
+        float: Score de similarité entre les deux événements.
+    """
+
     # Comparaison des titres
     title_similarity = jaccard_similarity(event1["titre"].split(), event2["titre"].split())
     
@@ -203,11 +257,22 @@ def calculate_event_similarity(event1, event2):
     return final_similarity
 
 #===================================================================================================
-# *                                         MAIN
+# *                                    PROCESS_EVENT_DATA
 #===================================================================================================
 
-def main(url):
+def process_event_data(url):
+    """
+    Cette fonction récupère les données JSON depuis une URL spécifiée, adapte chaque événement et retourne une liste 
+    d'événements adaptés sous forme JSON.
+    
+    Args:
+        url (str): L'URL depuis laquelle récupérer les données JSON.
+
+    Returns:
+        json: Liste d'événements adaptés sous forme JSON.
+    """
     # On récupère les données JSON depuis l'URL spécifiée
+
     fetchedData = fetch(url)
     print("Données récupérées avec succès!")
 
@@ -229,11 +294,21 @@ def main(url):
     return jsonify(adapted_events)
 
 #===================================================================================================
-# *                                         PROCESS_DATA
+# *                                         CLOUD_FUNCTION
 #===================================================================================================
 
 # Cette fonction est le point d'entrée de la fonction Cloud. Elle traite la requête HTTP reçue.
-def process_data(request):
+def cloud_function(request):
+    """
+    Cette fonction est le point d'entrée pour le service Cloud. Elle traite la requête HTTP reçue,
+    extrait l'URL depuis les paramètres de la requête, et récupère les données depuis cette URL.
+    
+    Args:
+        request (flask.Request): La requête HTTP reçue.
+
+    Returns:
+        json: Liste d'événements adaptés sous forme JSON ou un message d'erreur si l'URL n'est pas fournie dans la requête.
+    """
     
     # On récupère les données JSON de la requête
     request_json = request.get_json(silent=True)
@@ -249,5 +324,5 @@ def process_data(request):
         return jsonify({'error': 'Aucun paramètre url fourni. Veuillez ajouter un paramètre "url" à votre requête.'}), 400
 
     # On appelle la fonction main avec l'URL pour récupérer les données et on retourne le résultat en format JSON
-    data = main(url)
+    data = process_event_data(url)
     return data
