@@ -1,7 +1,7 @@
 #===================================================================================================
 # *                                         IMPORT
 #===================================================================================================
-from flask import escape                  # Cette bibliothèque permet de sécuriser des caractères spécifiques pour qu'ils ne soient pas interprétés de manière malveillante dans les chaînes HTML.
+from markupsafe import escape                  # Cette bibliothèque permet de sécuriser des caractères spécifiques pour qu'ils ne soient pas interprétés de manière malveillante dans les chaînes HTML.
 import requests                           # Utilisé pour envoyer des requêtes HTTP.
 import json                               # Permet de travailler avec des objets JSON. Utilisé pour la sérialisation et la désérialisation de JSON.
 from google.cloud import bigquery         # Client pour interagir avec l'API BigQuery de Google.
@@ -83,7 +83,7 @@ blackList = [
     "collecte de sang",
     "cinema",
     "gouter",
-    "concert njp",
+    "concert",
     "bien-etre",
     "trail",
     "commemoratif",
@@ -166,7 +166,7 @@ def adapt_event(event):
     ressource = None
     if "hasMainRepresentation" in event and "ebucore:hasRelatedResource" in event["hasMainRepresentation"]:
         ressource = event["hasMainRepresentation"]["ebucore:hasRelatedResource"]
-        print(f"Type: {type(ressource)}, Value: {ressource}")
+        #print(f"Type: {type(ressource)}, Value: {ressource}")
     if ressource and isinstance(ressource.get("ebucore:locator", {}), dict):
         image_url = ressource.get("ebucore:locator", {}).get("@value", None)
     else:
@@ -413,6 +413,9 @@ def cloud_function(request):
 # *                                         TEST DES FONCTIONS
 #===================================================================================================
 if __name__ == "__main__":
+    #---------------------------
+    #     TEST DU BLACKLIST
+    #---------------------------
     (filtered, not_filtered) = process_event_data(url)
 
     with open('filtered.json', 'w', encoding='utf-8') as f:
@@ -420,3 +423,14 @@ if __name__ == "__main__":
 
     with open('not_filtered.json', 'w', encoding='utf-8') as f:
         json.dump(not_filtered, f, ensure_ascii=False, indent=4)
+
+    #---------------------------
+    #     TEST DU WHITELIST
+    #---------------------------
+
+
+"""
+- faire la meme chose avec la whitelist 
+- tout verifier 
+- envoyer les json
+"""
