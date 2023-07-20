@@ -373,7 +373,7 @@ def process_event_data(url):
         if ignored_event is not None:  # Si une KeyError s'est produite, l'événement est ajouté à la liste des événements ignorés
             ignored_events.append(ignored_event)
     # On retourne la liste des événements adaptés en format JSON
-    return jsonify(adapted_events)
+    return adapted_events, ignored_events
 
 #===================================================================================================
 # *                                         CLOUD_FUNCTION
@@ -408,3 +408,15 @@ def cloud_function(request):
     # On appelle la fonction main avec l'URL pour récupérer les données et on retourne le résultat en format JSON
     data = process_event_data(url)
     return data
+
+#===================================================================================================
+# *                                         TEST DES FONCTIONS
+#===================================================================================================
+if __name__ == "__main__":
+    (filtered, not_filtered) = process_event_data(url)
+
+    with open('filtered.json', 'w', encoding='utf-8') as f:
+        json.dump(filtered, f, ensure_ascii=False, indent=4)
+
+    with open('not_filtered.json', 'w', encoding='utf-8') as f:
+        json.dump(not_filtered, f, ensure_ascii=False, indent=4)
