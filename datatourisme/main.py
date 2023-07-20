@@ -1,16 +1,21 @@
-from flask import escape
-import requests
-import json
+#===================================================================================================
+# *                                         IMPORT
+#===================================================================================================
+from flask import escape                  # Cette bibliothèque permet de sécuriser des caractères spécifiques pour qu'ils ne soient pas interprétés de manière malveillante dans les chaînes HTML.
+import requests                           # Utilisé pour envoyer des requêtes HTTP.
+import json                               # Permet de travailler avec des objets JSON. Utilisé pour la sérialisation et la désérialisation de JSON.
+from google.cloud import bigquery         # Client pour interagir avec l'API BigQuery de Google.
+from datetime import datetime             # Utilisé pour manipuler les dates et les heures.
+from google.oauth2 import service_account # Utilisé pour l'authentification avec un compte de service Google.
+import uuid                               # Utilisé pour générer des identifiants uniques universels.
+from flask import jsonify                 # Utilisé pour formater les réponses à renvoyer en tant que JSON.
+from sklearn.metrics.pairwise import cosine_similarity # Utilisé pour calculer la similitude cosinus entre les échantillons pour déterminer la similitude des textes.
+from sklearn.feature_extraction.text import CountVectorizer # Transforme le texte en vecteur de tokens pour faciliter le calcul de la similarité.
+import numpy as np                        # Utilisé pour des calculs scientifiques et la manipulation de structures de données multidimensionnelles.
+
 #===================================================================================================
 # *                                         API#2 DATATOURISME
 #===================================================================================================
-# Importation des bibliothèques nécessaires
-import requests
-import json
-from google.cloud import bigquery
-from datetime import datetime
-from google.oauth2 import service_account
-import uuid
 
 # URL du fichier JSON-LD
 url = "https://diffuseur.datatourisme.fr/webservice/49eebc93390a819eb8c2a0f95a150916/93cac18d-5c3e-4101-b0f5-db0c94423c88"
@@ -40,6 +45,12 @@ def adapt_event(event):
     if not all(key in event for key in ["rdfs:label", "schema:startDate", "schema:endDate", "isLocatedAt"]):
         return None, event
     
+    title = event["rdfs:label"].get("@value", None)
+
+    # If the event title contains a blacklisted word, return None
+    if blacklist(title, blackList):
+        return None, event
+    
     # Création d'un ID unique pour chaque événement à l'aide de uuid
     unique_id = str(uuid.uuid4())
 
@@ -56,8 +67,6 @@ def adapt_event(event):
 
 
     motscles = event.get("@type", None)
-
-    title = event["rdfs:label"].get("@value", None)
 
     start_date = retrieve_date(event, "schema:startDate")
 
@@ -135,17 +144,31 @@ def insert_into_bigquery(event):
         assert errors == []
 
 #===================================================================================================
+#                                          BLACKLIST
+#===================================================================================================
+def blacklist(event_title, list):
+    """
+    Cette fonction vérifie si l'événement doit être ignoré en fonction du titre.
+    Args:
+        event_title (str): Le titre de l'événement.
+        list (list): Une liste de mots interdits.
+
+    Returns:
+        bool: True si l'événement doit être ignoré, False sinon.
+    """
+    event_title_words = event_title.lower().split()
+    for word in event_title_words:
+        if word in list:
+            return True
+    return False
+
+#===================================================================================================
 #                                          TEST DE SIMILARITE
 #===================================================================================================
 
 # La fonction jaccard_similarity() calcule la similarité de Jaccard entre deux listes.
 # La fonction calculate_event_similarity() utilise cette fonction, ainsi que d'autres critères,
 # pour calculer un score de similarité global entre deux événements.
-
-from datetime import datetime
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.feature_extraction.text import CountVectorizer
-import numpy as np
 
 def jaccard_similarity(list1, list2):
     s1 = set(list1)
@@ -177,42 +200,48 @@ def calculate_event_similarity(event1, event2):
 # *                                         MAIN
 #===================================================================================================
 
-from flask import jsonify
-
-# Cette fonction est le point d'entrée du programme
 def main(url):
-    # Récupération des données JSON
+    # On récupère les données JSON depuis l'URL spécifiée
     fetchedData = fetch(url)
-    print("Données récupérées!")
+    print("Données récupérées avec succès!")
 
-    adapted_events = []  # Liste vide pour stocker les événements adaptés
-    ignored_events = []  # Liste vide pour stocker les événements ignorés
-    # Parcours de chaque événement, adaptation de l'événement et insertion dans BigQuery
+    # On crée deux listes vides : une pour stocker les événements adaptés et une autre pour ceux qui sont ignorés
+    adapted_events = []  
+    ignored_events = []  
+
+    # On parcourt chaque événement dans les données récupérées
     for event in fetchedData["@graph"]:
+        # On adapte l'événement et on le stocke soit dans la liste des événements adaptés, soit dans celle des événements ignorés
         adapted_event, ignored_event = adapt_event(event)
-        if adapted_event is not None:  # Ignore les valeurs None
-            #insert_into_bigquery(adapted_event)
+        if adapted_event is not None:  # On ignore les valeurs None
+            #insert_into_bigquery(adapted_event)  # Ligne commentée pour éviter l'insertion dans BigQuery durant les tests
             adapted_events.append(adapted_event)
-            #print("Événement adapté")
-        if ignored_event is not None:  # Ajoutez l'événement ignoré à la liste si une KeyError s'est produite
+            #print("Événement adapté et ajouté à la liste des événements adaptés")
+        if ignored_event is not None:  # Si une KeyError s'est produite, l'événement est ajouté à la liste des événements ignorés
             ignored_events.append(ignored_event)
+    # On retourne la liste des événements adaptés en format JSON
     return jsonify(adapted_events)
 
+#===================================================================================================
+# *                                         PROCESS_DATA
+#===================================================================================================
 
-
-# The entry point for the Cloud Function
+# Cette fonction est le point d'entrée de la fonction Cloud. Elle traite la requête HTTP reçue.
 def process_data(request):
     
-    # Make sure to set the appropriate access control permissions in your function
+    # On récupère les données JSON de la requête
     request_json = request.get_json(silent=True)
     request_args = request.args
 
+    # On vérifie si l'URL est fournie comme paramètre dans la requête
     if request_json and 'url' in request_json:
         url = request_json['url']
     elif request_args and 'url' in request_args:
         url = request_args['url']
     else:
-        return jsonify({'error': 'No url parameter provided. Please add an "url" parameter to your request.'}), 400
+        # Si l'URL n'est pas fournie, on retourne un message d'erreur en format JSON avec un code de statut HTTP 400
+        return jsonify({'error': 'Aucun paramètre url fourni. Veuillez ajouter un paramètre "url" à votre requête.'}), 400
 
+    # On appelle la fonction main avec l'URL pour récupérer les données et on retourne le résultat en format JSON
     data = main(url)
     return data
