@@ -14,6 +14,11 @@ from sklearn.feature_extraction.text import CountVectorizer # Transforme le text
 import numpy as np                        # Utilisé pour des calculs scientifiques et la manipulation de structures de données multidimensionnelles.
 
 #===================================================================================================
+# *                                         VARIABLES
+#===================================================================================================
+blackList = []
+
+#===================================================================================================
 # *                                         API#2 DATATOURISME
 #===================================================================================================
 
@@ -41,37 +46,38 @@ def fetch(url):
 
 # Cette fonction adapte les données de l'événement à insérer dans BigQuery
 def adapt_event(event):
-    # Vérifiez les clés requises
+    # Vérifier la présence des clés requises
     if not all(key in event for key in ["rdfs:label", "schema:startDate", "schema:endDate", "isLocatedAt"]):
         return None, event
-    
-    title = event["rdfs:label"].get("@value", None)
 
-    # If the event title contains a blacklisted word, return None
-    if blacklist(title, blackList):
+    # Récupération du titre
+    titre = event["rdfs:label"].get("@value", None)
+
+    # Si le titre de l'événement contient un mot de la liste noire, retourne None
+    if blacklist(titre, blackList):
         return None, event
-    
-    # Création d'un ID unique pour chaque événement à l'aide de uuid
+
+    # Création d'un identifiant unique pour chaque événement avec uuid
     unique_id = str(uuid.uuid4())
 
-    # D'autres éléments des données sont récupérés, vérifiés et adaptés pour correspondre à la structure de la table BigQuery.
-    # Other elements of the data are retrieved, checked, and adapted to fit the BigQuery table structure.
-    resource = None
+    # Récupération et adaptation d'autres éléments de données pour correspondre à la structure de la table BigQuery
+    ressource = None
     if "hasMainRepresentation" in event and "ebucore:hasRelatedResource" in event["hasMainRepresentation"]:
-        resource = event["hasMainRepresentation"]["ebucore:hasRelatedResource"]
-        print(f"Type: {type(resource)}, Value: {resource}")
-    if resource and isinstance(resource.get("ebucore:locator", {}), dict):
-        image_url = resource.get("ebucore:locator", {}).get("@value", None)
+        ressource = event["hasMainRepresentation"]["ebucore:hasRelatedResource"]
+        print(f"Type: {type(ressource)}, Value: {ressource}")
+    if ressource and isinstance(ressource.get("ebucore:locator", {}), dict):
+        image_url = ressource.get("ebucore:locator", {}).get("@value", None)
     else:
         image_url = None
 
+    # Récupération des mots clés
+    mots_cles = event.get("@type", None)
 
-    motscles = event.get("@type", None)
+    # Récupération des dates de début et de fin
+    date_debut = retrieve_date(event, "schema:startDate")
+    date_fin = retrieve_date(event, "schema:endDate")
 
-    start_date = retrieve_date(event, "schema:startDate")
-
-    end_date = retrieve_date(event, "schema:endDate")
-
+    # Récupération de la ville
     ville = None
     if "isLocatedAt" in event and "schema:address" in event["isLocatedAt"] and "schema:addressLocality" in event["isLocatedAt"]["schema:address"]:
         if isinstance(event["isLocatedAt"]["schema:address"]["schema:addressLocality"], list):
@@ -79,14 +85,13 @@ def adapt_event(event):
         else:
             ville = event["isLocatedAt"]["schema:address"]["schema:addressLocality"]
     else:
-        ville = "Unknown"
+        ville = "Inconnue"
 
-    # Vérifie et récupère la latitude et la longitude
+    # Vérification et récupération de la latitude et la longitude
     latitude = event["isLocatedAt"]["schema:geo"]["schema:latitude"].get("@value", None) if "isLocatedAt" in event and "schema:geo" in event["isLocatedAt"] and "schema:latitude" in event["isLocatedAt"]["schema:geo"] else None
     longitude = event["isLocatedAt"]["schema:geo"]["schema:longitude"].get("@value", None) if "isLocatedAt" in event and "schema:geo" in event["isLocatedAt"] and "schema:longitude" in event["isLocatedAt"]["schema:geo"] else None
 
-
-    # Vérifie et récupère la description
+    # Vérification et récupération de la description
     description = None
     if "rdfs:comment" in event and "@value" in event["rdfs:comment"]:
         description = event["rdfs:comment"]["@value"]
@@ -94,20 +99,21 @@ def adapt_event(event):
     # Création d'un dictionnaire avec les données adaptées
     adapted_event = {
         "id": unique_id,
-        "titre": title,
+        "titre": titre,
         "ville": ville,
         "latitude": latitude,
         "longitude": longitude,
-        "date_debut": start_date,
-        "date_fin": end_date,
+        "date_debut": date_debut,
+        "date_fin": date_fin,
         "description": description,
-        "type": {"motcle": motscles},
+        "type": {"motcle": mots_cles},
         "score": 0,
         "ts_entree": datetime.now().isoformat(),
         "source": event.get("@id", None),
         "image_url": image_url,
     }
     return adapted_event, None
+
 
 def retrieve_date(event, date_key):
     if date_key in event:
