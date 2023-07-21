@@ -268,6 +268,26 @@ def insert_into_bigquery(event):
         assert errors == []
 
 #===================================================================================================
+#                                          WHITELIST
+#===================================================================================================
+def whitelist(event_title, list):
+    """
+    Cette fonction vérifie si l'événement doit être retenu en fonction du titre.
+    Args:
+        event_title (str): Le titre de l'événement.
+        list (list): Une liste de mots autorisés.
+
+    Returns:
+        bool: True si l'événement doit être retenu, False sinon.
+    """
+    lower_event_title = event_title.lower()
+    for word in list:
+        if word.lower() in lower_event_title:
+            return True
+    return False
+
+
+#===================================================================================================
 #                                          BLACKLIST
 #===================================================================================================
 def blacklist(event_title, list):
