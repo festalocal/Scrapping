@@ -101,6 +101,44 @@ blackList = [
     "art"
 ]
 
+#Mots autorisés
+whiteList = [
+    "fest-noz", 
+    "fest noz", 
+    "fest",
+    "fest -deiz",
+    "fest deiz",
+    "feria", 
+    "carnaval",
+    "guinguette",
+    "bal",
+    "bals",
+    "variété française",
+    "buvette",
+    "buvettes",
+    "fête",
+    "fete",
+    "fetes",
+    "fête de village",
+    "fête du village",
+    "fête communale",
+    "fanfare",
+    "marché nocturne",
+    "fanfare",
+    "feu de la saint jean",
+    "feu de la st jean",
+    "feu de la st-jean",
+    "feu de la saint-jean",
+    "année 80",
+    "années 80",
+    "apéro",
+    "apero",
+    "fête municipale",
+    "fête de l'été",
+    "fête vosgienne",
+    "soirée vosgienne"
+]
+
 
 # URL du fichier JSON-LD
 url = "https://diffuseur.datatourisme.fr/webservice/49eebc93390a819eb8c2a0f95a150916/93cac18d-5c3e-4101-b0f5-db0c94423c88"
@@ -156,8 +194,11 @@ def adapt_event(event):
     titre = event["rdfs:label"].get("@value", None)
 
     # Si le titre de l'événement contient un mot de la liste noire, retourne None
-    if blacklist(titre, blackList):
-        return None, event
+    # if blacklist(titre, blackList):
+    #     return None, event
+
+    if whitelist(titre, blackList):
+        return event, None
 
     # Création d'un identifiant unique pour chaque événement avec uuid
     unique_id = str(uuid.uuid4())
