@@ -197,8 +197,8 @@ def adapt_event(event):
     # if blacklist(titre, blackList):
     #     return None, event
 
-    # if not whitelist(titre, blackList):
-    #     return None, event
+    if not whitelist(titre, blackList):
+        return None, event
 
     # Création d'un identifiant unique pour chaque événement avec uuid
     unique_id = str(uuid.uuid4())
