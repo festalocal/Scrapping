@@ -19,4 +19,4 @@ def convert(file):
             writer.writerow(row.values())
 
 if __name__ == '__main__':
-    convert("fetes.json")
+    convert("filtered.json")

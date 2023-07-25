@@ -5,8 +5,9 @@ from markupsafe import escape                  # Cette bibliothèque permet de s
 import requests                           # Utilisé pour envoyer des requêtes HTTP.
 import json                               # Permet de travailler avec des objets JSON. Utilisé pour la sérialisation et la désérialisation de JSON.
 from google.cloud import bigquery         # Client pour interagir avec l'API BigQuery de Google.
+from google.oauth2 import service_account
 from datetime import datetime             # Utilisé pour manipuler les dates et les heures.
-from google.oauth2 import service_account # Utilisé pour l'authentification avec un compte de service Google.
+from google.cloud.bigquery import SchemaField
 import uuid                               # Utilisé pour générer des identifiants uniques universels.
 from flask import jsonify                 # Utilisé pour formater les réponses à renvoyer en tant que JSON.
 from sklearn.metrics.pairwise import cosine_similarity # Utilisé pour calculer la similitude cosinus entre les échantillons pour déterminer la similitude des textes.
@@ -16,6 +17,14 @@ import numpy as np                        # Utilisé pour des calculs scientifiq
 #===================================================================================================
 # *                                         VARIABLES
 #===================================================================================================
+
+# Les informations d'authentification pour BigQuery sont dans ce fichier
+credentials = service_account.Credentials.from_service_account_file('festalocal-5d1186152900.json')
+client = bigquery.Client(credentials=credentials)
+
+# Spécifiez votre dataset et table BigQuery
+dataset_id = 'festa'
+table_id = 'evenement'
 
 #Mots interdits à définir 
 blackList = [
@@ -143,15 +152,6 @@ whiteList = [
 # URL du fichier JSON-LD
 url = "https://diffuseur.datatourisme.fr/webservice/49eebc93390a819eb8c2a0f95a150916/93cac18d-5c3e-4101-b0f5-db0c94423c88"
 
-# Les informations d'authentification pour BigQuery sont dans ce fichier
-credentials = service_account.Credentials.from_service_account_file('festalocal-fa14bbdaf49c.json')
-client = bigquery.Client(credentials=credentials)
-
-# Spécifiez votre dataset et table BigQuery
-dataset_id = 'festa'
-table_id = 'evenement'
-
-
 #===================================================================================================
 # *                                         API#2 DATATOURISME
 #===================================================================================================
@@ -197,8 +197,8 @@ def adapt_event(event):
     # if blacklist(titre, blackList):
     #     return None, event
 
-    if whitelist(titre, blackList):
-        return event, None
+    # if not whitelist(titre, blackList):
+    #     return None, event
 
     # Création d'un identifiant unique pour chaque événement avec uuid
     unique_id = str(uuid.uuid4())
@@ -267,7 +267,7 @@ def retrieve_date(event, date_key):
         date_key (str): La clé utilisée pour récupérer la date dans l'événement.
 
     Returns:
-        str: Une représentation string de la date au format ISO si elle est trouvée, sinon None.
+        str: Une représentation string de la date au format DD-MM-YYYY si elle est trouvée, sinon None.
     """
     if date_key in event:
         if isinstance(event[date_key], list):
@@ -286,6 +286,7 @@ def retrieve_date(event, date_key):
                 else:
                     return datetime.strptime(date_str, '%Y-%m-%d').date().isoformat()
     return None
+
 
 def insert_into_bigquery(event):
     """
@@ -308,24 +309,24 @@ def insert_into_bigquery(event):
         print(errors)
         assert errors == []
 
-#===================================================================================================
-#                                          WHITELIST
-#===================================================================================================
-def whitelist(event_title, list):
+def whitelist(event_title, liste_mots):
     """
     Cette fonction vérifie si l'événement doit être retenu en fonction du titre.
     Args:
         event_title (str): Le titre de l'événement.
-        list (list): Une liste de mots autorisés.
+        liste_mots (list): Une liste de mots à vérifier.
 
     Returns:
         bool: True si l'événement doit être retenu, False sinon.
     """
     lower_event_title = event_title.lower()
-    for word in list:
-        if word.lower() in lower_event_title:
+    for mots in liste_mots:
+        # Vérifie si tous les mots dans l'élément sont présents dans le titre
+        tous_mots_present = all(mot.lower() in lower_event_title for mot in mots.split())
+        if tous_mots_present:
             return True
     return False
+
 
 
 #===================================================================================================
@@ -428,70 +429,60 @@ def process_event_data(url):
         # On adapte l'événement et on le stocke soit dans la liste des événements adaptés, soit dans celle des événements ignorés
         adapted_event, ignored_event = adapt_event(event)
         if adapted_event is not None:  # On ignore les valeurs None
-            #insert_into_bigquery(adapted_event)  # Ligne commentée pour éviter l'insertion dans BigQuery durant les tests
+            insert_into_bigquery(adapted_event)  # Ligne commentée pour éviter l'insertion dans BigQuery durant les tests
             adapted_events.append(adapted_event)
-            #print("Événement adapté et ajouté à la liste des événements adaptés")
+            print("Événement adapté et ajouté à la liste des événements adaptés")
         if ignored_event is not None:  # Si une KeyError s'est produite, l'événement est ajouté à la liste des événements ignorés
             ignored_events.append(ignored_event)
     # On retourne la liste des événements adaptés en format JSON
-    return adapted_events, ignored_events
+    #return adapted_events, ignored_events
+    return("Insertion terminée !")
 
 #===================================================================================================
 # *                                         CLOUD_FUNCTION
 #===================================================================================================
-
-# Cette fonction est le point d'entrée de la fonction Cloud. Elle traite la requête HTTP reçue.
 def cloud_function(request):
     """
-    Cette fonction est le point d'entrée pour le service Cloud. Elle traite la requête HTTP reçue,
-    extrait l'URL depuis les paramètres de la requête, et récupère les données depuis cette URL.
-    
+    The entry point for the Cloud Function. It processes the received HTTP request,
+    extracts the API key from the request headers, and fetches data using that API key.
+
     Args:
-        request (flask.Request): La requête HTTP reçue.
+        request (flask.Request): The received HTTP request.
 
     Returns:
-        json: Liste d'événements adaptés sous forme JSON ou un message d'erreur si l'URL n'est pas fournie dans la requête.
+        json: List of events in JSON format or an error message if the API key is not provided in the request headers.
     """
-    
-    # On récupère les données JSON de la requête
-    request_json = request.get_json(silent=True)
-    request_args = request.args
 
-    # On vérifie si l'URL est fournie comme paramètre dans la requête
-    if request_json and 'url' in request_json:
-        url = request_json['url']
-    elif request_args and 'url' in request_args:
-        url = request_args['url']
-    else:
-        # Si l'URL n'est pas fournie, on retourne un message d'erreur en format JSON avec un code de statut HTTP 400
-        return jsonify({'error': 'Aucun paramètre url fourni. Veuillez ajouter un paramètre "url" à votre requête.'}), 400
+    # Base URL
+    base_url = "https://diffuseur.datatourisme.fr/webservice/"
 
-    # On appelle la fonction main avec l'URL pour récupérer les données et on retourne le résultat en format JSON
+    # Extract the API key from the request headers
+    key = request.headers.get('X-API-Key')  # Change 'X-API-Key' to the actual header name you want to use
+
+    if not key:
+        # If the API key is not provided in the request headers, return an error message
+        return jsonify({'error': 'API key not provided. Please include your API key in the request headers.'}), 400
+
+    # Concatenate the base URL with the API key to form the complete URL
+    url = base_url + key
+
+    # Call the main function with the URL to fetch data and return the result in JSON format
     data = process_event_data(url)
     return data
+
+
 
 #===================================================================================================
 # *                                         TEST DES FONCTIONS
 #===================================================================================================
 if __name__ == "__main__":
     #---------------------------
-    #     TEST DU BLACKLIST
+    #           TEST
     #---------------------------
-    (filtered, not_filtered) = process_event_data(url)
-
-    with open('filtered.json', 'w', encoding='utf-8') as f:
-        json.dump(filtered, f, ensure_ascii=False, indent=4)
-
-    with open('not_filtered.json', 'w', encoding='utf-8') as f:
-        json.dump(not_filtered, f, ensure_ascii=False, indent=4)
-
-    #---------------------------
-    #     TEST DU WHITELIST
-    #---------------------------
+    process_event_data(url)
 
 
-"""
-- faire la meme chose avec la whitelist 
-- tout verifier 
-- envoyer les json
-"""
+'''
+attribution d'image
+transformation d'image en évènement
+'''
