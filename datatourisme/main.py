@@ -197,7 +197,7 @@ def adapt_event(event):
     # if blacklist(titre, blackList):
     #     return None, event
 
-    if not whitelist(titre, blackList):
+    if not whitelist(titre, whiteList):
         return None, event
 
     # Création d'un identifiant unique pour chaque événement avec uuid
@@ -309,23 +309,26 @@ def insert_into_bigquery(event):
         print(errors)
         assert errors == []
 
-def whitelist(event_title, liste_mots):
+def whitelist(event_title, list_words):
     """
     Cette fonction vérifie si l'événement doit être retenu en fonction du titre.
+    Chaque élément dans list_words est considéré en entier.
+
     Args:
         event_title (str): Le titre de l'événement.
-        liste_mots (list): Une liste de mots à vérifier.
+        list_words (list): Une liste de mots ou groupes de mots à vérifier.
 
     Returns:
         bool: True si l'événement doit être retenu, False sinon.
     """
     lower_event_title = event_title.lower()
-    for mots in liste_mots:
+    for word_group in list_words:
         # Vérifie si tous les mots dans l'élément sont présents dans le titre
-        tous_mots_present = all(mot.lower() in lower_event_title for mot in mots.split())
-        if tous_mots_present:
+        all_words_present = all(word.lower() in lower_event_title for word in word_group.split())
+        if all_words_present:
             return True
     return False
+
 
 
 
@@ -439,6 +442,44 @@ def process_event_data(url):
     return("Insertion terminée !")
 
 #===================================================================================================
+# *                                         SEARCH_IMAGES
+#===================================================================================================
+def search_images(keyword, api_key, cx):
+    """
+    Cette fonction fait une requête à l'API Google Custom Search pour trouver des images liées à un mot-clé donné.
+    Elle retourne une liste d'URLs d'images.
+
+    Args:
+        keyword (str): Le mot-clé pour lequel chercher des images.
+        api_key (str): La clé API pour l'API Google Custom Search.
+        cx (str): L'ID du moteur de recherche personnalisé Google à utiliser.
+
+    Returns:
+        list[str]: Une liste d'URLs d'images si la requête est réussie. Sinon, retourne None.
+    """
+    
+    # Faire une requête à l'API
+    url = "https://www.googleapis.com/customsearch/v1"
+    params = {
+        'q': keyword,
+        'key': api_key,
+        'cx': cx,
+        'searchType': 'image',
+        'num': 10  # Nombre de résultats par requête
+    }
+    response = requests.get(url, params=params)
+
+    # Si la requête a réussi, json() renverra un dictionnaire
+    if response.status_code == 200:
+        results = response.json()
+        images = results.get('items', [])
+        image_urls = [image['link'] for image in images]
+        return image_urls
+    else:
+        print("Une erreur s'est produite", response.status_code)
+        return None
+
+#===================================================================================================
 # *                                         CLOUD_FUNCTION
 #===================================================================================================
 def cloud_function(request):
@@ -479,10 +520,13 @@ if __name__ == "__main__":
     #---------------------------
     #           TEST
     #---------------------------
-    process_event_data(url)
+    #process_event_data(url)
+    api_key = "AIzaSyAtkIadb9NVOVoQUKZrO0EbC-Uiw6bqaFA"
+    cx = "266bf28aad175417c"
+    keyword = "carnaval"
+    image_urls = search_images(keyword, api_key, cx)
 
-
-'''
-attribution d'image
-transformation d'image en évènement
-'''
+    if image_urls is not None:
+        for i in range(1,5):
+            for url in image_urls:
+                print(url)
