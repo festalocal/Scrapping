@@ -3,28 +3,18 @@
 #===================================================================================================
 from markupsafe import escape                  # Cette bibliothèque permet de sécuriser des caractères spécifiques pour qu'ils ne soient pas interprétés de manière malveillante dans les chaînes HTML.
 import requests                           # Utilisé pour envoyer des requêtes HTTP.
-import json                               # Permet de travailler avec des objets JSON. Utilisé pour la sérialisation et la désérialisation de JSON.
 from google.cloud import bigquery         # Client pour interagir avec l'API BigQuery de Google.
-from google.oauth2 import service_account
 from datetime import datetime             # Utilisé pour manipuler les dates et les heures.
 from google.cloud.bigquery import SchemaField
 import uuid                               # Utilisé pour générer des identifiants uniques universels.
 from flask import jsonify                 # Utilisé pour formater les réponses à renvoyer en tant que JSON.
-from sklearn.metrics.pairwise import cosine_similarity # Utilisé pour calculer la similitude cosinus entre les échantillons pour déterminer la similitude des textes.
-from sklearn.feature_extraction.text import CountVectorizer # Transforme le texte en vecteur de tokens pour faciliter le calcul de la similarité.
+#from sklearn.metrics.pairwise import cosine_similarity # Utilisé pour calculer la similitude cosinus entre les échantillons pour déterminer la similitude des textes.
+#from sklearn.feature_extraction.text import CountVectorizer # Transforme le texte en vecteur de tokens pour faciliter le calcul de la similarité.
 import numpy as np                        # Utilisé pour des calculs scientifiques et la manipulation de structures de données multidimensionnelles.
 
 #===================================================================================================
 # *                                         VARIABLES
 #===================================================================================================
-
-# Les informations d'authentification pour BigQuery sont dans ce fichier
-credentials = service_account.Credentials.from_service_account_file('festalocal-5d1186152900.json')
-client = bigquery.Client(credentials=credentials)
-
-# Spécifiez votre dataset et table BigQuery
-dataset_id = 'festa'
-table_id = 'evenement'
 
 #Mots interdits à définir 
 blackList = [
@@ -148,10 +138,6 @@ whiteList = [
     "soirée vosgienne"
 ]
 
-
-# URL du fichier JSON-LD
-url = "https://diffuseur.datatourisme.fr/webservice/49eebc93390a819eb8c2a0f95a150916/93cac18d-5c3e-4101-b0f5-db0c94423c88"
-
 #===================================================================================================
 # *                                         API#2 DATATOURISME
 #===================================================================================================
@@ -166,13 +152,20 @@ def fetch(url):
     Returns:
         data (dict): Un dictionnaire contenant les données du fichier JSON-LD.
     """
-    # Récupéeration du fichier JSON-LD
-    response = requests.get(url)
-    data = response.json()
+    try:
+        # Récupéeration du fichier JSON-LD
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
 
-    # Sauvegarde du fichier JSON-LD dans un fichier data.jsonld
-    # with open("data.jsonld", "w", encoding="utf-8") as f:
-    #     json.dump(data, f, ensure_ascii=False)
+    except requests.exceptions.RequestException as e:
+        print(f"Error while fetching data: {e}")
+        return {}  # Return an empty dictionary for failed requests
+        
+    except ValueError as ve:
+        print(f"Error decoding JSON response: {ve}")
+        return {}  # Return an empty dictionary for invalid JSON responses
+
     return data
 
 def adapt_event(event):
@@ -296,8 +289,29 @@ def insert_into_bigquery(event):
         event (dict): L'événement à insérer dans la table BigQuery.
 
     """
+
+    # Get the unique ID of the event
+    unique_id = event.get("id")
+
+    # use default credentials
+    client = bigquery.Client()
+
+    # Spécifiez votre dataset et table BigQuery
+    dataset_id = 'festa'
+    table_id = 'evenement'
+
     table_ref = client.dataset(dataset_id).table(table_id)
     table = client.get_table(table_ref)
+
+    query = f"SELECT COUNT(*) as count FROM `{dataset_id}.{table_id}` WHERE id = '{unique_id}'"
+    result = client.query(query).result()
+
+    for row in result:
+        count = row.get('count', 0)
+        if count > 0:
+            # Event already exists, skip inserting it
+            print("Event already exists in BigQuery. Skipping insertion.")
+            return
 
     rows_to_insert = [
         event,
@@ -309,6 +323,42 @@ def insert_into_bigquery(event):
         print(errors)
         assert errors == []
 
+
+def delete_expired_events():
+    """
+    Cette fonction supprime tous les événements de la table BigQuery dont la date de début est strictement inférieure à la date actuelle.
+
+    """
+
+    # Utiliser les informations d'identification par défaut
+    client = bigquery.Client()
+
+    # Spécifiez votre dataset et table BigQuery
+    dataset_id = 'festa'
+    table_id = 'evenement'
+
+    # Obtention de la date actuelle au format DATE
+    date_actuelle = datetime.date.today().isoformat()
+
+    # Construction de la requête
+    query = f"""
+        DELETE FROM `{dataset_id}.{table_id}`
+        WHERE date_de_debut < DATE '{date_actuelle}'
+    """
+
+    # Exécution de la requête
+    query_job = client.query(query)  # API request
+
+    # Attente de la fin de l'exécution de la requête
+    result = query_job.result()  
+
+    # Afficher un message pour informer que les événements ont été supprimés
+    print("Les événements avec une date de début inférieure à la date actuelle ont été supprimés.")
+
+
+#===================================================================================================
+#                                          WHITELIST
+#===================================================================================================
 def whitelist(event_title, list_words):
     """
     Cette fonction vérifie si l'événement doit être retenu en fonction du titre.
@@ -328,9 +378,6 @@ def whitelist(event_title, list_words):
         if all_words_present:
             return True
     return False
-
-
-
 
 #===================================================================================================
 #                                          BLACKLIST
@@ -442,44 +489,6 @@ def process_event_data(url):
     return("Insertion terminée !")
 
 #===================================================================================================
-# *                                         SEARCH_IMAGES
-#===================================================================================================
-def search_images(keyword, api_key, cx):
-    """
-    Cette fonction fait une requête à l'API Google Custom Search pour trouver des images liées à un mot-clé donné.
-    Elle retourne une liste d'URLs d'images.
-
-    Args:
-        keyword (str): Le mot-clé pour lequel chercher des images.
-        api_key (str): La clé API pour l'API Google Custom Search.
-        cx (str): L'ID du moteur de recherche personnalisé Google à utiliser.
-
-    Returns:
-        list[str]: Une liste d'URLs d'images si la requête est réussie. Sinon, retourne None.
-    """
-    
-    # Faire une requête à l'API
-    url = "https://www.googleapis.com/customsearch/v1"
-    params = {
-        'q': keyword,
-        'key': api_key,
-        'cx': cx,
-        'searchType': 'image',
-        'num': 10  # Nombre de résultats par requête
-    }
-    response = requests.get(url, params=params)
-
-    # Si la requête a réussi, json() renverra un dictionnaire
-    if response.status_code == 200:
-        results = response.json()
-        images = results.get('items', [])
-        image_urls = [image['link'] for image in images]
-        return image_urls
-    else:
-        print("Une erreur s'est produite", response.status_code)
-        return None
-
-#===================================================================================================
 # *                                         CLOUD_FUNCTION
 #===================================================================================================
 def cloud_function(request):
@@ -507,32 +516,9 @@ def cloud_function(request):
     # Concatenate the base URL with the API key to form the complete URL
     url = base_url + key
 
+    # Suppression des événements expirés
+    delete_expired_events()
+    
     # Call the main function with the URL to fetch data and return the result in JSON format
-    data = process_event_data(url)
-    return data
-
-
-
-#===================================================================================================
-# *                                         TEST DES FONCTIONS
-#===================================================================================================
-if __name__ == "__main__":
-    #---------------------------
-    #           TEST
-    #---------------------------
-    #process_event_data(url)
-    api_key = "AIzaSyAtkIadb9NVOVoQUKZrO0EbC-Uiw6bqaFA"
-    cx = "266bf28aad175417c"
-    keyword = "carnaval fete"
-    image_urls = search_images(keyword, api_key, cx)
-
-    if image_urls is not None:
-        for url in image_urls:
-            print(url)
-
-#NER name entity recognition
-'''
-- image par catégorie d'événement
-- chaque evt à une caté et chaque caté à une image
-
-'''
+    process_event_data(url)
+    return("Terminé !")
