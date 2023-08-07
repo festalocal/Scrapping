@@ -842,6 +842,11 @@ def categorize_festival(title: str, description: str) -> str:
         "boulangerie",
         "pâtisserie",
     ]
+
+    all_text = (title + " " + description).lower()
+
+    determinants = ["du", "de", "la", "le", "des"]
+
     #------------------------
     # ? FETE GASTRONOMIQUE
     #---------------------------
@@ -853,13 +858,10 @@ def categorize_festival(title: str, description: str) -> str:
             and words[i - 2] == "fête"
         ):
             return "Fête gastronomique"
-        
-    determinants = ["du", "de", "la", "le", "des"]
-
+    
     #------------------------
     # ?       FETES
     #---------------------------
-    all_text = (title + " " + description).lower()
 
     for category, keys in keywords.items():
         for key in keys:
