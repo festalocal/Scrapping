@@ -842,41 +842,34 @@ def categorize_festival(title: str, description: str) -> str:
         "boulangerie",
         "pâtisserie",
     ]
-
-    determinants = ["du", "de", "la", "le", "des"]
-
-    title_description = (title + " " + description).lower()
-
-    for category, keys in keywords.items():
-        for key in keys:
-            if key in title_description:
-                return category
-
-    # Chercher une fête gastronomique
-    words = title_description.split()
+    #------------------------
+    # ? FETE GASTRONOMIQUE
+    #---------------------------
+    words = all_text.split()
     for i in range(2, len(words)):  # commencer à 2 car on vérifie toujours 2 mots avant
         if (
             words[i] in food_keywords
             and words[i - 1] in determinants
             and words[i - 2] == "fête"
         ):
-            return "fête gastronomique"
+            return "Fête gastronomique"
+        
+    determinants = ["du", "de", "la", "le", "des"]
 
+    #------------------------
+    # ?       FETES
+    #---------------------------
+    all_text = (title + " " + description).lower()
+
+    for category, keys in keywords.items():
+        for key in keys:
+            if key in all_text:
+                return category
+    
+    #------------------------
+    # ?        SI RIEN
+    #---------------------------
     return "Autres fêtes populaires"
-
-
-# Test de la fonction
-print(
-    categorize_festival(
-        "La fête du jambon", "Venez découvrir notre délicieux jambon local!"
-    )
-)
-print(
-    categorize_festival(
-        "Fête de l'ananas", "Une célébration dédiée à l'ananas juteux et délicieux"
-    )
-)
-
 
 # ===================================================================================================
 #                                         CLOUD_FUNCTION
@@ -922,3 +915,16 @@ def cloud_function(request):
     process_event_data(url)
     print("Terminé !")
     return "Terminé !"
+
+if __name__ == '__main__':
+    # Test de la fonction
+    print(
+        categorize_festival(
+            "La fête du jambon", "Venez découvrir notre délicieux jambon local!"
+        )
+    )
+    print(
+        categorize_festival(
+            "Fête de l'ananas", "Une célébration dédiée à l'ananas juteux et délicieux"
+        )
+    )
