@@ -6,11 +6,13 @@ import requests                           # Utilisé pour envoyer des requêtes 
 from google.cloud import bigquery         # Client pour interagir avec l'API BigQuery de Google.
 from datetime import datetime             # Utilisé pour manipuler les dates et les heures.
 from google.cloud.bigquery import SchemaField
+from datetime import datetime
 import uuid                               # Utilisé pour générer des identifiants uniques universels.
 from flask import jsonify                 # Utilisé pour formater les réponses à renvoyer en tant que JSON.
 #from sklearn.metrics.pairwise import cosine_similarity # Utilisé pour calculer la similitude cosinus entre les échantillons pour déterminer la similitude des textes.
 #from sklearn.feature_extraction.text import CountVectorizer # Transforme le texte en vecteur de tokens pour faciliter le calcul de la similarité.
 import numpy as np                        # Utilisé pour des calculs scientifiques et la manipulation de structures de données multidimensionnelles.
+import pgeocode
 
 #===================================================================================================
 # *                                         VARIABLES
@@ -168,6 +170,9 @@ def fetch(url):
 
     return data
 
+#===================================================================================================
+#                                        ADAPT_EVENT
+#===================================================================================================
 def adapt_event(event):
     """
     Cette fonction adapte les données de l'événement pour être insérées dans BigQuery.
@@ -186,11 +191,11 @@ def adapt_event(event):
     # Récupération du titre
     titre = event["rdfs:label"].get("@value", None)
 
-    # Si le titre de l'événement contient un mot de la liste noire, retourne None
-    # if blacklist(titre, blackList):
-    #     return None, event
-
     if not whitelist(titre, whiteList):
+        return None, event
+
+    # Si le titre de l'événement contient un mot de la liste noire, retourne None
+    if blacklist(titre, blackList):
         return None, event
 
     # Création d'un identifiant unique pour chaque événement avec uuid
@@ -213,15 +218,43 @@ def adapt_event(event):
     date_debut = retrieve_date(event, "schema:startDate")
     date_fin = retrieve_date(event, "schema:endDate")
 
-    # Récupération de la ville
+    nomi = pgeocode.Nominatim('fr')
+    
+
+    # Récupération de la ville, du code postal et de la région
     ville = None
-    if "isLocatedAt" in event and "schema:address" in event["isLocatedAt"] and "schema:addressLocality" in event["isLocatedAt"]["schema:address"]:
-        if isinstance(event["isLocatedAt"]["schema:address"]["schema:addressLocality"], list):
-            ville = event["isLocatedAt"]["schema:address"]["schema:addressLocality"][0]
-        else:
-            ville = event["isLocatedAt"]["schema:address"]["schema:addressLocality"]
-    else:
-        ville = "Inconnue"
+    code_postal = None
+    region = None
+    if "isLocatedAt" in event and "schema:address" in event["isLocatedAt"]:
+        address = event["isLocatedAt"]["schema:address"]
+        
+        if "schema:addressLocality" in address:
+            if isinstance(address["schema:addressLocality"], list):
+                ville = address["schema:addressLocality"][0]
+            else:
+                ville = address["schema:addressLocality"]
+                
+        if "schema:postalCode" in address:
+            if isinstance(address["schema:postalCode"], list):
+                code_postal = address["schema:postalCode"][0]
+            else:
+                code_postal = address["schema:postalCode"]
+
+        region = nomi.query_postal_code(code_postal)
+        region = region['state_name']
+
+        if "hasAddressCity" in address and "isPartOfRegion" in address["hasAddressCity"]:
+            region_info = address["hasAddressCity"]["isPartOfRegion"]
+            if "rdfs:label" in region_info and "@value" in region_info["rdfs:label"]:
+                region = region_info["rdfs:label"]["@value"]
+    
+    # If ville is still None, return None, event
+    if ville is None:
+        return None, event
+    if code_postal is None:
+        code_postal = "Inconnu"
+    if region is None:
+        region = "Inconnue"
 
     # Vérification et récupération de la latitude et la longitude
     latitude = event["isLocatedAt"]["schema:geo"]["schema:latitude"].get("@value", None) if "isLocatedAt" in event and "schema:geo" in event["isLocatedAt"] and "schema:latitude" in event["isLocatedAt"]["schema:geo"] else None
@@ -231,6 +264,8 @@ def adapt_event(event):
     description = None
     if "rdfs:comment" in event and "@value" in event["rdfs:comment"]:
         description = event["rdfs:comment"]["@value"]
+
+    categorie = get_categorie(titre)
 
     # Création d'un dictionnaire avec les données adaptées
     adapted_event = {
@@ -247,10 +282,15 @@ def adapt_event(event):
         "ts_entree": datetime.now().isoformat(),
         "source": event.get("@id", None),
         "image_url": image_url,
+        "categorie": categorie,
+        "cp": code_postal,
+        "region": region,
     }
     return adapted_event, None
 
-
+#===================================================================================================
+#                                      RETRIEVE_DATE
+#===================================================================================================
 def retrieve_date(event, date_key):
     """
     Cette fonction extrait une date d'un événement en fonction de la clé de la date donnée.
@@ -280,49 +320,70 @@ def retrieve_date(event, date_key):
                     return datetime.strptime(date_str, '%Y-%m-%d').date().isoformat()
     return None
 
+#===================================================================================================
+#                                      CHECK_FOR_DUPLICATES
+#===================================================================================================
+
+def check_for_duplicates():
+    """
+    Cette fonction vérifie si un événement est un doublon en le comparant avec les événements existants dans la base de données.
+    Utilise une structure de données Set pour un accès plus rapide.
+
+    Returns:
+        set: Ensemble des identifiants des événements déjà présents dans la base de données.
+    """
+    client = bigquery.Client()
+    dataset_id = 'festa'
+    table_id = 'evenement'
+    query = f"SELECT source FROM `{dataset_id}.{table_id}`"
+    result = client.query(query).result()
+    # Transforme le résultat en un ensemble (set) pour une vérification plus rapide des doublons
+    existing_ids = set(row.get('source', '') for row in result)
+    return existing_ids
+
+
+#===================================================================================================
+#                                      INSERT_INTO_BIGQUERY
+#===================================================================================================
 
 def insert_into_bigquery(event):
     """
-    Cette fonction insère un événement dans une table spécifique de BigQuery.
+    Cette fonction insère un événement dans une table spécifique de BigQuery s'il n'est pas un doublon.
 
     Args:
         event (dict): L'événement à insérer dans la table BigQuery.
 
     """
 
-    # Get the unique ID of the event
-    unique_id = event.get("id")
+    try:
 
-    # use default credentials
-    client = bigquery.Client()
+        # Utiliser les informations d'identification par défaut
+        client = bigquery.Client()
 
-    # Spécifiez votre dataset et table BigQuery
-    dataset_id = 'festa'
-    table_id = 'evenement'
+        # Spécifiez votre dataset et table BigQuery
+        dataset_id = 'festa'
+        table_id = 'evenement'
 
-    table_ref = client.dataset(dataset_id).table(table_id)
-    table = client.get_table(table_ref)
+        table_ref = client.dataset(dataset_id).table(table_id)
+        table = client.get_table(table_ref)
 
-    query = f"SELECT COUNT(*) as count FROM `{dataset_id}.{table_id}` WHERE id = '{unique_id}'"
-    result = client.query(query).result()
+        rows_to_insert = [
+            event,
+        ]
 
-    for row in result:
-        count = row.get('count', 0)
-        if count > 0:
-            # Event already exists, skip inserting it
-            print("Event already exists in BigQuery. Skipping insertion.")
-            return
+        errors = client.insert_rows_json(table, rows_to_insert)  # Requête API
 
-    rows_to_insert = [
-        event,
-    ]
+        if errors != []:
+            print(errors)
+            raise Exception("Une erreur s'est produite lors de l'insertion des lignes dans BigQuery.")
 
-    errors = client.insert_rows_json(table, rows_to_insert)  # API request
+    except Exception as e:
+        print(f"Une erreur s'est produite : {e}")
 
-    if errors != []:
-        print(errors)
-        assert errors == []
 
+#===================================================================================================
+#                                       DELETE_EXPIRED_EVENTS
+#===================================================================================================
 
 def delete_expired_events():
     """
@@ -337,23 +398,47 @@ def delete_expired_events():
     dataset_id = 'festa'
     table_id = 'evenement'
 
-    # Obtention de la date actuelle au format DATE
-    date_actuelle = datetime.date.today().isoformat()
+    # Obtenir la date actuelle
+    date_actuelle = datetime.now().date().isoformat()
 
-    # Construction de la requête
-    query = f"""
-        DELETE FROM `{dataset_id}.{table_id}`
-        WHERE date_de_debut < DATE '{date_actuelle}'
+    # Construction de la requête pour compter les événements à supprimer
+    query_count = f"""
+        SELECT COUNT(*)
+        FROM `{dataset_id}.{table_id}`
+        WHERE date_fin < DATE '{date_actuelle}' AND DATE(ts_entree) < DATE '{date_actuelle}'
     """
-
-    # Exécution de la requête
-    query_job = client.query(query)  # API request
-
-    # Attente de la fin de l'exécution de la requête
+    
+    # Exécution de la requête de comptage
+    query_job = client.query(query_count)  # API request
     result = query_job.result()  
 
-    # Afficher un message pour informer que les événements ont été supprimés
+    # Récupération du nombre d'événements à supprimer
+    for row in result:
+        count_before = row[0]
+
+    print(f"Il y a {count_before} événements qui vont être supprimés.")
+
+    # Construction de la requête de suppression
+    query_delete = f"""
+        DELETE FROM `{dataset_id}.{table_id}`
+        WHERE date_fin < DATE '{date_actuelle}' AND DATE(ts_entree) < DATE '{date_actuelle}'
+    """
+
+    # Exécution de la requête de suppression
+    query_job = client.query(query_delete)  # API request
+    result = query_job.result()  
+
+    # Exécution de nouveau la requête de comptage
+    query_job = client.query(query_count)  # API request
+    result = query_job.result()  
+
+    # Récupération du nombre d'événements après la suppression
+    for row in result:
+        count_after = row[0]
+
+    print(f"Il y a maintenant {count_after} événements concernés après la suppression.")
     print("Les événements avec une date de début inférieure à la date actuelle ont été supprimés.")
+
 
 
 #===================================================================================================
@@ -372,12 +457,16 @@ def whitelist(event_title, list_words):
         bool: True si l'événement doit être retenu, False sinon.
     """
     lower_event_title = event_title.lower()
+    title_words = lower_event_title.split()
+    
     for word_group in list_words:
-        # Vérifie si tous les mots dans l'élément sont présents dans le titre
-        all_words_present = all(word.lower() in lower_event_title for word in word_group.split())
-        if all_words_present:
-            return True
+        words = word_group.lower().split()
+        for i in range(len(title_words) - len(words) + 1):
+            if title_words[i:i+len(words)] == words:
+                return True
     return False
+
+
 
 #===================================================================================================
 #                                          BLACKLIST
@@ -397,6 +486,41 @@ def blacklist(event_title, list):
         if word in list:
             return True
     return False
+
+#===================================================================================================
+#                                          GET_CATEGORIE
+#===================================================================================================
+def get_categorie(title):
+    """
+    Cette fonction répère le mot essentiel dans un titre.
+
+    Args:
+        title (str): Le titre à analyser.
+
+    Returns:
+        str: Le mot essentiel trouvé dans le titre, sinon "Autre".
+    """
+
+    # Liste des mots essentiels
+    essential_words = [
+        "fest-noz", "feria", "carnaval",
+        "guinguette", "festival",
+        "foire artisanale", "fête du village"
+    ]
+
+    # Convertir le titre en minuscules
+    lower_title = title.lower()
+
+    # Parcourir chaque phrase dans essential_words
+    for phrase in essential_words:
+        # Vérifier si la phrase est dans le titre
+        if phrase in lower_title:
+            return phrase
+
+    # Si aucune phrase essentielle n'a été trouvée, retourner "Autre"
+    return "autre"
+
+
 
 #===================================================================================================
 #                                          TEST DE SIMILARITE
@@ -458,38 +582,46 @@ def process_event_data(url):
     """
     Cette fonction récupère les données JSON depuis une URL spécifiée, adapte chaque événement et retourne une liste 
     d'événements adaptés sous forme JSON.
-    
+    Elle effectue également une vérification des doublons avant d'insérer un événement.
+
     Args:
         url (str): L'URL depuis laquelle récupérer les données JSON.
 
     Returns:
         json: Liste d'événements adaptés sous forme JSON.
     """
-    # On récupère les données JSON depuis l'URL spécifiée
-
     fetchedData = fetch(url)
     print("Données récupérées avec succès!")
 
-    # On crée deux listes vides : une pour stocker les événements adaptés et une autre pour ceux qui sont ignorés
+    existing_ids = check_for_duplicates()
+
+    # Séparation des événements en deux listes : nouveaux événements et événements déjà existants
+    new_events = [event for event in fetchedData["@graph"] if event.get("@id", None) not in existing_ids]
+    existing_events = [event for event in fetchedData["@graph"] if event.get("@id", None) in existing_ids]
+
+    print(f"Il y a {len(new_events)} événements dans new_events")
+    print(f"Il y a {len(existing_events)} événements dans existing_events")
+
     adapted_events = []  
     ignored_events = []  
 
-    # On parcourt chaque événement dans les données récupérées
-    for event in fetchedData["@graph"]:
-        # On adapte l'événement et on le stocke soit dans la liste des événements adaptés, soit dans celle des événements ignorés
+    for event in new_events:
         adapted_event, ignored_event = adapt_event(event)
-        if adapted_event is not None:  # On ignore les valeurs None
-            insert_into_bigquery(adapted_event)  # Ligne commentée pour éviter l'insertion dans BigQuery durant les tests
+        if adapted_event is not None:
+            #print(adapted_event)
+            insert_into_bigquery(adapted_event) 
             adapted_events.append(adapted_event)
-            print("Événement adapté et ajouté à la liste des événements adaptés")
-        if ignored_event is not None:  # Si une KeyError s'est produite, l'événement est ajouté à la liste des événements ignorés
+        if ignored_event is not None:
+            #insert_into_bigquery(ignored_event)
+            print(ignored_event)
             ignored_events.append(ignored_event)
-    # On retourne la liste des événements adaptés en format JSON
-    #return adapted_events, ignored_events
-    return("Insertion terminée !")
+    
+    #print(ignored_events)
+    return("Les événements existants ont été ignorés. L'insertion est terminée !")
+
 
 #===================================================================================================
-# *                                         CLOUD_FUNCTION
+#                                         CLOUD_FUNCTION
 #===================================================================================================
 def cloud_function(request):
     """
@@ -521,4 +653,5 @@ def cloud_function(request):
     
     # Call the main function with the URL to fetch data and return the result in JSON format
     process_event_data(url)
+    print("Terminé !")
     return("Terminé !")
