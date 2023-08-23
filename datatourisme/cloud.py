@@ -696,16 +696,15 @@ def process_event_data(url):
     # print(ignored_events)
     return "Les événements existants ont été ignorés. L'insertion est terminée !"
 
-
 # ===================================================================================================
 # *                                    CATEGORIZE_FESTIVAL
 # ===================================================================================================
 def categorize_festival(title: str, description: str) -> str:
     keywords = {
-        "Feria": ["feria", "féria", "ferias"],
-        "Fest-noz": ["fest-noz", "fest noz", "noz", "deiz"],
-        "Carnaval": ["carnaval"],
-        "Fête de village": [
+        "feria": ["feria", "féria", "ferias"],
+        "fest-noz": ["fest-noz", "fest noz", "noz", "deiz"],
+        "carnaval": ["carnaval"],
+        "fete_de_village": [
             "village",
             "communal",
             "communale",
@@ -720,19 +719,21 @@ def categorize_festival(title: str, description: str) -> str:
             "fete votive",
             "fete patronale",
         ],
-        "Festival": ["festival", "estival"],
-        "Guinguette": ["guinguette", "apéro", "apero"],
-        "Bal populaire": ["bal", "folk", "bals", "folks"],
-        "Foire artisanale": ["foire artisanale", "foire", "marché", "marché nocturne"],
-        "fête médiévale": ["médievale", "médiévale", "medieval"],
-        "Autres fêtes populaires": [],
+        "festival": ["festival", "estival"],
+        "guinguette": ["guinguette", "apéro", "apero"],
+        "bal_populaire": ["bal", "folk", "bals", "folks"],
+        "foire_artisanale": ["foire artisanale", "foire", "marché", "marché nocturne"],
+        "fete_medievale": ["médievale", "médiévale", "medieval"],
     }
 
     food_keywords = [
         "jambon",
+        "choucroute",
         "ananas",
         "vin",
+        "patate",
         "fromage",
+        "citrouille",
         "pain",
         "poulet",
         "agneau",
@@ -832,6 +833,7 @@ def categorize_festival(title: str, description: str) -> str:
         "thé",
         "infusion",
         "jus",
+        "sardine",
         "soda",
         "limonade",
         "eau",
@@ -841,11 +843,25 @@ def categorize_festival(title: str, description: str) -> str:
         "truffe",
         "boulangerie",
         "pâtisserie",
+        "sardine",
+        "huître",
+        "boeufs",
+        "soupe",
+        "marron",
+        "châtaignes",
+        "amande"
     ]
 
-    all_text = (title + " " + description).lower()
+    #Traite le cas ou description est vide aussi
+    all_text = (str(title if title else "") + " " + str(description if description else "")).lower()
 
-    determinants = ["du", "de", "la", "le", "des"]
+    print(all_text)
+    all_text = all_text.replace("l'", "")  # handle "l'"
+
+    print(all_text)
+
+    determinants = ["du", "de la", "la", "le", "des", "de"]
+
 
     #------------------------
     # ? FETE GASTRONOMIQUE
@@ -857,7 +873,7 @@ def categorize_festival(title: str, description: str) -> str:
             and words[i - 1] in determinants
             and words[i - 2] == "fête"
         ):
-            return "Fête gastronomique"
+            return "fete_gastronomique"
     
     #------------------------
     # ?       FETES
@@ -871,7 +887,54 @@ def categorize_festival(title: str, description: str) -> str:
     #------------------------
     # ?        SI RIEN
     #---------------------------
-    return "Autres fêtes populaires"
+    return "autres"
+
+    
+def main(request):
+    # Initialize a BigQuery client
+    client = bigquery.Client()
+
+    # Define the query to extract data
+    query = """
+    SELECT id, titre, description, categorie 
+    FROM `festalocal.festa.evenement`
+    WHERE categorie = 'autre'
+    """
+
+    try:
+        # Execute the query and load the results into a pandas DataFrame
+        df = client.query(query).to_dataframe()
+        print(f"Loaded {len(df)} rows from BigQuery.")
+    except Exception as e:
+        print(f"Error loading data from BigQuery: {e}")
+        return "Error loading data from BigQuery"
+
+    try:
+        # Apply the function 'categorize_festival' to each row in the DataFrame
+        df['new_categorie'] = df.apply(lambda row: categorize_festival(row['titre'], row['description']), axis=1)
+        print("Applied 'categorize_festival' function to DataFrame.")
+    except Exception as e:
+        print(f"Error applying 'categorize_festival' function: {e}")
+        return "Error applying 'categorize_festival' function"
+
+    # Print some sample rows
+    print(df.head())
+
+    for index, row in df.iterrows():
+        update_query = f"""
+        UPDATE `festalocal.festa.evenement`
+        SET categorie = '{row['new_categorie']}'
+        WHERE id = '{row['id']}'
+        """
+
+        try:
+            client.query(update_query)
+            print(f"Updated row {row['id']} successfully.")
+        except Exception as e:
+            print(f"Error updating row {row['id']}: {e}")
+
+    return "Modification effectuée"
+
 
 # ===================================================================================================
 #                                         CLOUD_FUNCTION
@@ -927,6 +990,6 @@ if __name__ == '__main__':
     )
     print(
         categorize_festival(
-            "Fête de l'ananas", "Une célébration dédiée à l'ananas juteux et délicieux"
+            "Fête de l'amande", "Une célébration dédiée à l'ananas juteux et délicieux"
         )
     )
