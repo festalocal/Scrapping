@@ -1,6 +1,9 @@
 requests
-sklearn
+scikit-learn
 datetime
 uuid
 firebase_admin
 markupsafe
+flask
+numpy
+

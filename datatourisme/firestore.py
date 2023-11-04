@@ -2,22 +2,18 @@ import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
 import requests
-from markupsafe import escape                  # Cette bibliothèque permet de sécuriser des caractères spécifiques pour qu'ils ne soient pas interprétés de manière malveillante dans les chaînes HTML.
-import requests                           # Utilisé pour envoyer des requêtes HTTP.
-import json                               # Permet de travailler avec des objets JSON. Utilisé pour la sérialisation et la désérialisation de JSON.
-from google.cloud import bigquery         # Client pour interagir avec l'API BigQuery de Google.
-from google.oauth2 import service_account
-from datetime import datetime             # Utilisé pour manipuler les dates et les heures.
-from google.cloud.bigquery import SchemaField
-import uuid                               # Utilisé pour générer des identifiants uniques universels.
-from flask import jsonify                 # Utilisé pour formater les réponses à renvoyer en tant que JSON.
-from sklearn.metrics.pairwise import cosine_similarity # Utilisé pour calculer la similitude cosinus entre les échantillons pour déterminer la similitude des textes.
-from sklearn.feature_extraction.text import CountVectorizer # Transforme le texte en vecteur de tokens pour faciliter le calcul de la similarité.
-import numpy as np                        # Utilisé pour des calculs scientifiques et la manipulation de structures de données multidimensionnelles.
+from markupsafe import escape
+import requests
+from datetime import datetime
+import uuid
+from flask import jsonify
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import CountVectorizer
+import numpy as np
 # URL du fichier JSON-LD
 url = "https://diffuseur.datatourisme.fr/webservice/49eebc93390a819eb8c2a0f95a150916/93cac18d-5c3e-4101-b0f5-db0c94423c88"
 
-cred =credentials.Certificate('festalocal-bd4613184dd8.json')
+cred = credentials.Certificate('festalocal-bd4613184dd8.json')
 
 app = firebase_admin.initialize_app(cred)
 
@@ -49,7 +45,7 @@ def process_event_data(url):
     """
     Cette fonction récupère les données JSON depuis une URL spécifiée, adapte chaque événement et retourne une liste 
     d'événements adaptés sous forme JSON.
-    
+
     Args:
         url (str): L'URL depuis laquelle récupérer les données JSON.
 
@@ -62,8 +58,8 @@ def process_event_data(url):
     print("Données récupérées avec succès!")
 
     # On crée deux listes vides : une pour stocker les événements adaptés et une autre pour ceux qui sont ignorés
-    adapted_events = []  
-    ignored_events = []  
+    adapted_events = []
+    ignored_events = []
 
     # On parcourt chaque événement dans les données récupérées
     for event in fetchedData["@graph"]:
@@ -78,7 +74,6 @@ def process_event_data(url):
     return adapted_events, ignored_events
     # return("Insertion terminée !")
 
-    
 def adapt_event(event):
     """
     Cette fonction adapte les données de l'événement pour être insérées dans BigQuery.
@@ -111,7 +106,7 @@ def adapt_event(event):
     ressource = None
     if "hasMainRepresentation" in event and "ebucore:hasRelatedResource" in event["hasMainRepresentation"]:
         ressource = event["hasMainRepresentation"]["ebucore:hasRelatedResource"]
-        #print(f"Type: {type(ressource)}, Value: {ressource}")
+        # print(f"Type: {type(ressource)}, Value: {ressource}")
     if ressource and isinstance(ressource.get("ebucore:locator", {}), dict):
         image_url = ressource.get("ebucore:locator", {}).get("@value", None)
     else:
@@ -135,8 +130,10 @@ def adapt_event(event):
         ville = "Inconnue"
 
     # Vérification et récupération de la latitude et la longitude
-    latitude = event["isLocatedAt"]["schema:geo"]["schema:latitude"].get("@value", None) if "isLocatedAt" in event and "schema:geo" in event["isLocatedAt"] and "schema:latitude" in event["isLocatedAt"]["schema:geo"] else None
-    longitude = event["isLocatedAt"]["schema:geo"]["schema:longitude"].get("@value", None) if "isLocatedAt" in event and "schema:geo" in event["isLocatedAt"] and "schema:longitude" in event["isLocatedAt"]["schema:geo"] else None
+    latitude = event["isLocatedAt"]["schema:geo"]["schema:latitude"].get(
+        "@value", None) if "isLocatedAt" in event and "schema:geo" in event["isLocatedAt"] and "schema:latitude" in event["isLocatedAt"]["schema:geo"] else None
+    longitude = event["isLocatedAt"]["schema:geo"]["schema:longitude"].get(
+        "@value", None) if "isLocatedAt" in event and "schema:geo" in event["isLocatedAt"] and "schema:longitude" in event["isLocatedAt"]["schema:geo"] else None
 
     # Vérification et récupération de la description
     description = None
@@ -213,6 +210,7 @@ def insert_into_bigquery(event):
         print(errors)
         assert errors == []
 
+
 def whitelist(event_title, list_words):
     """
     Cette fonction vérifie si l'événement doit être retenu en fonction du titre.
@@ -228,17 +226,16 @@ def whitelist(event_title, list_words):
     lower_event_title = event_title.lower()
     for word_group in list_words:
         # Vérifie si tous les mots dans l'élément sont présents dans le titre
-        all_words_present = all(word.lower() in lower_event_title for word in word_group.split())
+        all_words_present = all(
+            word.lower() in lower_event_title for word in word_group.split())
         if all_words_present:
             return True
     return False
 
 
-
-
-#===================================================================================================
+# ===================================================================================================
 #                                          BLACKLIST
-#===================================================================================================
+# ===================================================================================================
 def blacklist(event_title, list):
     """
     Cette fonction vérifie si l'événement doit être ignoré en fonction du titre.
@@ -255,14 +252,15 @@ def blacklist(event_title, list):
             return True
     return False
 
-#===================================================================================================
+# ===================================================================================================
 #                                          TEST DE SIMILARITE
-#===================================================================================================
+# ===================================================================================================
+
 
 def jaccard_similarity(list1, list2):
     """
     Cette fonction calcule la similarité de Jaccard entre deux listes.
-    
+
     Args:
         list1 (list): Première liste à comparer.
         list2 (list): Deuxième liste à comparer.
@@ -274,11 +272,12 @@ def jaccard_similarity(list1, list2):
     s2 = set(list2)
     return len(s1.intersection(s2)) / len(s1.union(s2))
 
+
 def calculate_event_similarity(event1, event2):
     """
     Cette fonction calcule un score de similarité global entre deux événements en utilisant la similarité de Jaccard
     et d'autres critères (comparaison des titres, des villes, des dates de début et de fin).
-    
+
     Args:
         event1 (dict): Premier événement à comparer.
         event2 (dict): Deuxième événement à comparer.
@@ -288,24 +287,30 @@ def calculate_event_similarity(event1, event2):
     """
 
     # Comparaison des titres
-    title_similarity = jaccard_similarity(event1["titre"].split(), event2["titre"].split())
-    
+    title_similarity = jaccard_similarity(
+        event1["titre"].split(), event2["titre"].split())
+
     # Comparaison des villes
-    city_similarity = 1 if event1["ville"].lower() == event2["ville"].lower() else 0
-    
+    city_similarity = 1 if event1["ville"].lower(
+    ) == event2["ville"].lower() else 0
+
     # Comparaison des dates de début et de fin
     date_format = "%Y-%m-%d"
-    start_date_diff = abs((datetime.strptime(event1["date_debut"], date_format) - datetime.strptime(event2["date_debut"], date_format)).days)
-    end_date_diff = abs((datetime.strptime(event1["date_fin"], date_format) - datetime.strptime(event2["date_fin"], date_format)).days)
-    
+    start_date_diff = abs((datetime.strptime(
+        event1["date_debut"], date_format) - datetime.strptime(event2["date_debut"], date_format)).days)
+    end_date_diff = abs((datetime.strptime(
+        event1["date_fin"], date_format) - datetime.strptime(event2["date_fin"], date_format)).days)
+
     # Normalisation des différences de dates (supposons qu'une différence de 30 jours est considérée comme une différence maximale)
     start_date_similarity = 1 - (start_date_diff / 30)
     end_date_similarity = 1 - (end_date_diff / 30)
-    
+
     # Calcul du score de similarité final comme la moyenne des scores de similarité individuels
-    final_similarity = np.mean([title_similarity, city_similarity, start_date_similarity, end_date_similarity])
-    print(f"Le score de similarité entre les deux événements est de : {final_similarity*100:.2f}%")
+    final_similarity = np.mean(
+        [title_similarity, city_similarity, start_date_similarity, end_date_similarity])
+    print(f"Le score de similarité entre les deux événements est de: {
+          final_similarity*100: .2f}%")
     return final_similarity
+
+
 print(process_event_data(url)[0:3])
-
-
