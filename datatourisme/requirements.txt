@@ -1,7 +1,6 @@
 requests
-json
-google-cloud-bigquery
 sklearn
 datetime
 uuid
 firebase_admin
+markupsafe

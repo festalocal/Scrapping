@@ -65,7 +65,7 @@ blackList = [
     "trésor",
     "abbaye",
     "portes ouvertes",
-    "téléthon",
+"téléthon",
     "trial",
     "art",
     "contes",
