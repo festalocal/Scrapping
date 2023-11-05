@@ -1,5 +1,5 @@
-{
-"blackList" : [
+
+blackList=  [
     "contes",
     "théâtre",
     "lecture",
@@ -80,4 +80,4 @@
     "telethon",
     "trial",
     "art"
-]}
+]

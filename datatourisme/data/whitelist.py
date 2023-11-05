@@ -1,4 +1,4 @@
-{"whitelist":[
+whiteList=[
     "fest-noz", 
     "fest noz", 
     "fest",
@@ -34,4 +34,4 @@
     "fête vosgienne",
     "soirée vosgienne"
 ]
-}
+

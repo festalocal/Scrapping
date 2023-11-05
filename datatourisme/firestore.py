@@ -10,6 +10,8 @@ from flask import jsonify
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import CountVectorizer
 import numpy as np
+from data.blacklist import blackList
+from data.whitelist import whiteList
 # URL du fichier JSON-LD
 url = "https://diffuseur.datatourisme.fr/webservice/49eebc93390a819eb8c2a0f95a150916/93cac18d-5c3e-4101-b0f5-db0c94423c88"
 
@@ -18,91 +20,36 @@ cred = credentials.Certificate('festalocal-bd4613184dd8.json')
 app = firebase_admin.initialize_app(cred)
 
 db = firestore.client()
-doc_ref = db.collection("users").document("alovelace")
-doc_ref.set({"first": "Ada", "last": "Lovelace", "born": 1815})
-print('user added')
 
 def fetch(url):
-    """
-    Cette fonction récupère les données du fichier JSON-LD à l'URL spécifiée.
-
-    Args:
-        url (str): L'URL du fichier JSON-LD.
-
-    Returns:
-        data (dict): Un dictionnaire contenant les données du fichier JSON-LD.
-    """
-    # Récupéeration du fichier JSON-LD
     response = requests.get(url)
     data = response.json()
-
-    # Sauvegarde du fichier JSON-LD dans un fichier data.jsonld
-    # with open("data.jsonld", "w", encoding="utf-8") as f:
-    #     json.dump(data, f, ensure_ascii=False)
     return data
 
 def process_event_data(url):
-    """
-    Cette fonction récupère les données JSON depuis une URL spécifiée, adapte chaque événement et retourne une liste 
-    d'événements adaptés sous forme JSON.
-
-    Args:
-        url (str): L'URL depuis laquelle récupérer les données JSON.
-
-    Returns:
-        json: Liste d'événements adaptés sous forme JSON.
-    """
-    # On récupère les données JSON depuis l'URL spécifiée
-
     fetchedData = fetch(url)
     print("Données récupérées avec succès!")
-
-    # On crée deux listes vides : une pour stocker les événements adaptés et une autre pour ceux qui sont ignorés
     adapted_events = []
     ignored_events = []
-
-    # On parcourt chaque événement dans les données récupérées
     for event in fetchedData["@graph"]:
-        # On adapte l'événement et on le stocke soit dans la liste des événements adaptés, soit dans celle des événements ignorés
         adapted_event, ignored_event = adapt_event(event)
         if adapted_event is not None:  # On ignore les valeurs None
             adapted_events.append(adapted_event)
             print("Événement adapté et ajouté à la liste des événements adaptés")
         if ignored_event is not None:  # Si une KeyError s'est produite, l'événement est ajouté à la liste des événements ignorés
             ignored_events.append(ignored_event)
-    # On retourne la liste des événements adaptés en format JSON
     return adapted_events, ignored_events
-    # return("Insertion terminée !")
 
 def adapt_event(event):
-    """
-    Cette fonction adapte les données de l'événement pour être insérées dans BigQuery.
-
-    Args:
-        event (dict): Un dictionnaire contenant les détails de l'événement.
-
-    Returns:
-        adapted_event (dict) or None: Un dictionnaire contenant les détails de l'événement adaptés pour BigQuery, ou None si l'événement contient un mot de la liste noire dans son titre.
-        event (dict) or None: L'événement original non modifié, ou None si les données ont été adaptées avec succès.
-    """
-    # Vérifier la présence des clés requises
     if not all(key in event for key in ["rdfs:label", "schema:startDate", "schema:endDate", "isLocatedAt"]):
         return None, event
-
-    # Récupération du titre
     titre = event["rdfs:label"].get("@value", None)
-
-    # Si le titre de l'événement contient un mot de la liste noire, retourne None
-    # if blacklist(titre, blackList):
-    #     return None, event
+    if blacklist(titre, blackList):
+        return None, event
 
     if not whitelist(titre, whiteList):
         return None, event
-
-    # Création d'un identifiant unique pour chaque événement avec uuid
     unique_id = str(uuid.uuid4())
-
-    # Récupération et adaptation d'autres éléments de données pour correspondre à la structure de la table BigQuery
     ressource = None
     if "hasMainRepresentation" in event and "ebucore:hasRelatedResource" in event["hasMainRepresentation"]:
         ressource = event["hasMainRepresentation"]["ebucore:hasRelatedResource"]
@@ -111,15 +58,9 @@ def adapt_event(event):
         image_url = ressource.get("ebucore:locator", {}).get("@value", None)
     else:
         image_url = None
-
-    # Récupération des mots clés
     mots_cles = event.get("@type", None)
-
-    # Récupération des dates de début et de fin
     date_debut = retrieve_date(event, "schema:startDate")
     date_fin = retrieve_date(event, "schema:endDate")
-
-    # Récupération de la ville
     ville = None
     if "isLocatedAt" in event and "schema:address" in event["isLocatedAt"] and "schema:addressLocality" in event["isLocatedAt"]["schema:address"]:
         if isinstance(event["isLocatedAt"]["schema:address"]["schema:addressLocality"], list):
@@ -128,19 +69,13 @@ def adapt_event(event):
             ville = event["isLocatedAt"]["schema:address"]["schema:addressLocality"]
     else:
         ville = "Inconnue"
-
-    # Vérification et récupération de la latitude et la longitude
     latitude = event["isLocatedAt"]["schema:geo"]["schema:latitude"].get(
         "@value", None) if "isLocatedAt" in event and "schema:geo" in event["isLocatedAt"] and "schema:latitude" in event["isLocatedAt"]["schema:geo"] else None
     longitude = event["isLocatedAt"]["schema:geo"]["schema:longitude"].get(
         "@value", None) if "isLocatedAt" in event and "schema:geo" in event["isLocatedAt"] and "schema:longitude" in event["isLocatedAt"]["schema:geo"] else None
-
-    # Vérification et récupération de la description
     description = None
     if "rdfs:comment" in event and "@value" in event["rdfs:comment"]:
         description = event["rdfs:comment"]["@value"]
-
-    # Création d'un dictionnaire avec les données adaptées
     adapted_event = {
         "id": unique_id,
         "titre": titre,
@@ -160,16 +95,6 @@ def adapt_event(event):
 
 
 def retrieve_date(event, date_key):
-    """
-    Cette fonction extrait une date d'un événement en fonction de la clé de la date donnée.
-
-    Args:
-        event (dict): L'événement d'où la date est à extraire.
-        date_key (str): La clé utilisée pour récupérer la date dans l'événement.
-
-    Returns:
-        str: Une représentation string de la date au format DD-MM-YYYY si elle est trouvée, sinon None.
-    """
     if date_key in event:
         if isinstance(event[date_key], list):
             for date_obj in event[date_key]:
@@ -189,27 +114,10 @@ def retrieve_date(event, date_key):
     return None
 
 
-def insert_into_bigquery(event):
-    """
-    Cette fonction insère un événement dans une table spécifique de BigQuery.
-
-    Args:
-        event (dict): L'événement à insérer dans la table BigQuery.
-
-    """
-    table_ref = client.dataset(dataset_id).table(table_id)
-    table = client.get_table(table_ref)
-
-    rows_to_insert = [
-        event,
-    ]
-
-    errors = client.insert_rows_json(table, rows_to_insert)  # API request
-
-    if errors != []:
-        print(errors)
-        assert errors == []
-
+def insert_into_firestore(event):
+    doc_ref = db.collection("events").document(event.id)
+    doc_ref.set(event)
+    print('event added')
 
 def whitelist(event_title, list_words):
     """
