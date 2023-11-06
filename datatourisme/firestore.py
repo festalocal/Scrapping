@@ -130,80 +130,34 @@ def whitelist(event_title, list_words):
             return True
     return False
 
-
-# ===================================================================================================
-#                                          BLACKLIST
-# ===================================================================================================
 def blacklist(event_title, list):
-    """
-    Cette fonction vérifie si l'événement doit être ignoré en fonction du titre.
-    Args:
-        event_title (str): Le titre de l'événement.
-        list (list): Une liste de mots interdits.
-
-    Returns:
-        bool: True si l'événement doit être ignoré, False sinon.
-    """
     event_title_words = event_title.lower().split()
     for word in event_title_words:
         if word in list:
             return True
     return False
 
-# ===================================================================================================
-#                                          TEST DE SIMILARITE
-# ===================================================================================================
-
-
 def jaccard_similarity(list1, list2):
-    """
-    Cette fonction calcule la similarité de Jaccard entre deux listes.
-
-    Args:
-        list1 (list): Première liste à comparer.
-        list2 (list): Deuxième liste à comparer.
-
-    Returns:
-        float: Score de similarité de Jaccard entre les deux listes.
-    """
     s1 = set(list1)
     s2 = set(list2)
     return len(s1.intersection(s2)) / len(s1.union(s2))
 
-
 def calculate_event_similarity(event1, event2):
-    """
-    Cette fonction calcule un score de similarité global entre deux événements en utilisant la similarité de Jaccard
-    et d'autres critères (comparaison des titres, des villes, des dates de début et de fin).
-
-    Args:
-        event1 (dict): Premier événement à comparer.
-        event2 (dict): Deuxième événement à comparer.
-
-    Returns:
-        float: Score de similarité entre les deux événements.
-    """
-
-    # Comparaison des titres
     title_similarity = jaccard_similarity(
         event1["titre"].split(), event2["titre"].split())
 
-    # Comparaison des villes
     city_similarity = 1 if event1["ville"].lower(
     ) == event2["ville"].lower() else 0
 
-    # Comparaison des dates de début et de fin
     date_format = "%Y-%m-%d"
     start_date_diff = abs((datetime.strptime(
         event1["date_debut"], date_format) - datetime.strptime(event2["date_debut"], date_format)).days)
     end_date_diff = abs((datetime.strptime(
         event1["date_fin"], date_format) - datetime.strptime(event2["date_fin"], date_format)).days)
 
-    # Normalisation des différences de dates (supposons qu'une différence de 30 jours est considérée comme une différence maximale)
     start_date_similarity = 1 - (start_date_diff / 30)
     end_date_similarity = 1 - (end_date_diff / 30)
 
-    # Calcul du score de similarité final comme la moyenne des scores de similarité individuels
     final_similarity = np.mean(
         [title_similarity, city_similarity, start_date_similarity, end_date_similarity])
     print(f"Le score de similarité entre les deux événements est de: {
