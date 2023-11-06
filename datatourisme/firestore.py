@@ -115,22 +115,12 @@ def retrieve_date(event, date_key):
 
 
 def insert_into_firestore(event):
-    doc_ref = db.collection("events").document(event.id)
+    print(event)
+    doc_ref = db.collection("events").document(event["id"])
     doc_ref.set(event)
     print('event added')
 
 def whitelist(event_title, list_words):
-    """
-    Cette fonction vérifie si l'événement doit être retenu en fonction du titre.
-    Chaque élément dans list_words est considéré en entier.
-
-    Args:
-        event_title (str): Le titre de l'événement.
-        list_words (list): Une liste de mots ou groupes de mots à vérifier.
-
-    Returns:
-        bool: True si l'événement doit être retenu, False sinon.
-    """
     lower_event_title = event_title.lower()
     for word_group in list_words:
         # Vérifie si tous les mots dans l'élément sont présents dans le titre
@@ -220,5 +210,7 @@ def calculate_event_similarity(event1, event2):
           final_similarity*100: .2f}%")
     return final_similarity
 
+for event in process_event_data(url)[0]:
+    insert_into_firestore(event)
 
-print(process_event_data(url)[0:3])
+
