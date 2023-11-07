@@ -1,3 +1,4 @@
+import pgeocode
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
@@ -53,7 +54,6 @@ def adapt_event(event):
     ressource = None
     if "hasMainRepresentation" in event and "ebucore:hasRelatedResource" in event["hasMainRepresentation"]:
         ressource = event["hasMainRepresentation"]["ebucore:hasRelatedResource"]
-        # print(f"Type: {type(ressource)}, Value: {ressource}")
     if ressource and isinstance(ressource.get("ebucore:locator", {}), dict):
         image_url = ressource.get("ebucore:locator", {}).get("@value", None)
     else:
@@ -61,7 +61,41 @@ def adapt_event(event):
     mots_cles = event.get("@type", None)
     date_debut = retrieve_date(event, "schema:startDate")
     date_fin = retrieve_date(event, "schema:endDate")
+    nomi = pgeocode.Nominatim("fr")
     ville = None
+    code_postal = None
+    region = None
+    if "isLocatedAt" in event and "schema:address" in event["isLocatedAt"]:
+        address = event["isLocatedAt"]["schema:address"]
+
+        if "schema:addressLocality" in address:
+            if isinstance(address["schema:addressLocality"], list):
+                ville = address["schema:addressLocality"][0]
+            else:
+                ville = address["schema:addressLocality"]
+
+        if "schema:postalCode" in address:
+            if isinstance(address["schema:postalCode"], list):
+                code_postal = address["schema:postalCode"][0]
+            else:
+                code_postal = address["schema:postalCode"]
+
+        region = nomi.query_postal_code(code_postal)
+        region = region["state_name"]
+
+        if (
+            "hasAddressCity" in address
+            and "isPartOfRegion" in address["hasAddressCity"]
+        ):
+            region_info = address["hasAddressCity"]["isPartOfRegion"]
+            if "rdfs:label" in region_info and "@value" in region_info["rdfs:label"]:
+                region = region_info["rdfs:label"]["@value"]
+    if ville is None:
+        return None, event
+    if code_postal is None:
+        code_postal = "Inconnu"
+    if region is None:
+        region = "Inconnue"
     if "isLocatedAt" in event and "schema:address" in event["isLocatedAt"] and "schema:addressLocality" in event["isLocatedAt"]["schema:address"]:
         if isinstance(event["isLocatedAt"]["schema:address"]["schema:addressLocality"], list):
             ville = event["isLocatedAt"]["schema:address"]["schema:addressLocality"][0]
@@ -90,6 +124,8 @@ def adapt_event(event):
         "ts_entree": datetime.now().isoformat(),
         "source": event.get("@id", None),
         "image_url": image_url,
+        "region":region,
+        "pc":code_postal
     }
     return adapted_event, None
 
@@ -123,7 +159,6 @@ def insert_into_firestore(event):
 def whitelist(event_title, list_words):
     lower_event_title = event_title.lower()
     for word_group in list_words:
-        # Vérifie si tous les mots dans l'élément sont présents dans le titre
         all_words_present = all(
             word.lower() in lower_event_title for word in word_group.split())
         if all_words_present:
